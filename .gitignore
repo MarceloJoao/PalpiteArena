@@ -1,9 +1,6 @@
-﻿# Go binaries
-services/**/*.exe
-services/**/notificacao
-
-# Go build cache
-services/**/vendor/
+﻿# Binarios Go compilados (nao enviar pro repositorio)
+services/notificacao/notificacao
+services/notificacao/*.exe
 
 # IntelliJ IDEA
 .idea/
