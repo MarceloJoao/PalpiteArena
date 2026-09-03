@@ -1,0 +1,37 @@
+﻿# mise.toml — define as tasks do projeto (similar ao npm scripts ou Makefile)
+# Uso: mise run <task>
+
+# Builda apenas a API Quarkus (sem rodar os testes)
+[tasks."build:api"]
+description = "Builda a API Quarkus"
+dir = "api"
+run = "./gradlew build -x test"
+
+# Builda apenas o servico Go
+[tasks."build:go"]
+description = "Builda o servico Go"
+dir = "services/notificacao"
+run = "go build ./..."
+
+# Builda todos os servicos de uma vez
+# Executa build:api e build:go em paralelo
+[tasks.build]
+description = "Builda todos os servicos"
+depends = ["build:api", "build:go"]
+
+# Roda os testes da API Quarkus
+[tasks."test:api"]
+description = "Testa a API Quarkus"
+dir = "api"
+run = "./gradlew test"
+
+# Roda os testes do servico Go
+[tasks."test:go"]
+description = "Testa o servico Go"
+dir = "services/notificacao"
+run = "go test ./..."
+
+# Roda todos os testes de uma vez
+[tasks.test]
+description = "Testa todos os servicos"
+depends = ["test:api", "test:go"]

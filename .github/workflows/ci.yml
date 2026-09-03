@@ -1,0 +1,52 @@
+﻿name: CI
+
+# Dispara o CI em todo push ou Pull Request na branch main
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # Job 1: compila e testa a API Quarkus (Java)
+  build-api:
+    name: Build & Test API (Quarkus/Java)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o codigo do repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Java 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: "25"
+          distribution: oracle
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compilar a API
+        run: cd api && ./gradlew build -x test
+
+      - name: Rodar os testes da API
+        run: cd api && ./gradlew test
+
+  # Job 2: compila e testa o servico Go
+  build-go:
+    name: Build & Test Go Service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o codigo do repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Go 1.23
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+
+      - name: Compilar o servico Go
+        run: cd services/notificacao && go build ./...
+
+      - name: Rodar os testes do servico Go
+        run: cd services/notificacao && go test ./...

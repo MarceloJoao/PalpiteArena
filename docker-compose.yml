@@ -1,0 +1,30 @@
+﻿# Define todos os containers que sobem juntos com "docker compose up"
+services:
+
+  # Container do servico principal (Java + Quarkus)
+  api:
+    build:
+      context: ./api                           # pasta com o codigo da API
+      dockerfile: src/main/docker/Dockerfile.jvm  # Dockerfile gerado pelo Quarkus
+    ports:
+      - "8080:8080"  # porta-do-seu-pc:porta-dentro-do-container
+    environment:
+      QUARKUS_HTTP_PORT: 8080  # diz ao Quarkus para escutar na porta 8080
+    depends_on:
+      - notificacao  # garante que o Go sobe antes da API
+    networks:
+      - arenapro-net  # coloca na rede interna compartilhada
+
+  # Container do servico de notificacoes (Go)
+  notificacao:
+    build:
+      context: ./services/notificacao  # pasta com o codigo Go
+    ports:
+      - "8081:8081"  # porta-do-seu-pc:porta-dentro-do-container
+    networks:
+      - arenapro-net  # mesma rede — os containers se falam pelo nome do servico
+
+# Rede interna criada pelo Docker para os containers se comunicarem
+networks:
+  arenapro-net:
+    driver: bridge  # modo padrao de rede no Docker

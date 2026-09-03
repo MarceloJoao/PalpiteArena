@@ -1,0 +1,6 @@
+﻿# Go binaries
+services/**/*.exe
+services/**/notificacao
+
+# Go build cache
+services/**/vendor/
