@@ -1,6 +1,6 @@
-﻿# ArenaPro
+﻿# Palpite Arena
 
-Monorepo da plataforma **ArenaPro** — sistema de gestao de arenas esportivas.
+Monorepo da plataforma **Palpite Arena** — sistema de gestao de palpites individuais e bolão.
 
 ## Estrutura
 
