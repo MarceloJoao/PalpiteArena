@@ -5,3 +5,6 @@ services/notificacao/*.exe
 # IntelliJ IDEA
 .idea/
 *.iml
+
+# VS Code
+.vscode/
