@@ -4,3 +4,7 @@ services/**/notificacao
 
 # Go build cache
 services/**/vendor/
+
+# IntelliJ IDEA
+.idea/
+*.iml
