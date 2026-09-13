@@ -1,12 +1,25 @@
-﻿# Palpite Arena
+﻿# PalpiteArena
 
-Monorepo da plataforma **Palpite Arena** — sistema de gestao de palpites individuais e bolão.
+Monorepo da plataforma **PalpiteArena** — sistema de palpites esportivos onde usuarios
+cadastram palpites em partidas de futebol, acumulam pontos e disputam rankings por temporada.
+
+## Equipe
+
+| Nome                  | Matricula   |
+|-----------------------|-------------|
+| Antonnione Coelho     | 20250041045 |
+| Joao Marcelo de Soua | 20220030819 |
+
+**Disciplina:** DIM0547 — Desenvolvimento de Sistemas Web II
+**Periodo:** 2026.2
+
+---
 
 ## Estrutura
 
 ```
 .
-├── api/              # Servico principal — Java 25 + Quarkus
+├── api/              # Servico principal — Java 21 + Quarkus
 ├── services/
 │   └── notificacao/  # Servico de notificacoes — Go
 ├── protos/           # Definicoes Protobuf
@@ -15,12 +28,16 @@ Monorepo da plataforma **Palpite Arena** — sistema de gestao de palpites indiv
 └── mise.toml
 ```
 
+---
+
 ## Pre-requisitos
 
-- [Java 25](https://www.oracle.com/java/technologies/downloads/)
+- [Java 21](https://www.oracle.com/java/technologies/downloads/)
 - [Go 1.23+](https://go.dev/dl/)
 - [mise](https://mise.jdx.dev/)
 - [Docker](https://www.docker.com/)
+
+---
 
 ## Como rodar
 
@@ -34,18 +51,38 @@ mise run build
 mise run test
 ```
 
+### Apenas a API
+```bash
+mise run build:api
+mise run test:api
+```
+
+### Apenas o servico Go
+```bash
+mise run build:go
+mise run test:go
+```
+
 ### Via Docker Compose
 ```bash
 docker compose up --build
 ```
 
+---
+
 ## Servicos
 
-| Servico     | Porta | Stack           |
-|-------------|-------|-----------------|
-| api         | 8080  | Java 25/Quarkus |
-| notificacao | 8081  | Go 1.23         |
+| Servico     | Porta | Stack          |
+|-------------|-------|----------------|
+| api         | 8080  | Java 21/Quarkus |
+| notificacao | 8081  | Go 1.23        |
 
-## Arquitetura
+---
+
+## Proposta de arquitetura
 
 Ver [docs/Proposta.md](docs/Proposta.md).
+
+## Backlog
+
+Ver [GitHub Projects](https://github.com/MarceloJoao/PalpiteArena/projects).
