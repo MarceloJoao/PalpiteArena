@@ -8,7 +8,7 @@ cadastram palpites em partidas de futebol, acumulam pontos e disputam rankings p
 | Nome                  | Matricula   |
 |-----------------------|-------------|
 | Antonnione Coelho     | 20250041045 |
-| Joao Marcelo de Soua | 20220030819 |
+| Joao Marcelo de Souza | 20220030819 |
 
 **Disciplina:** DIM0547 — Desenvolvimento de Sistemas Web II
 **Periodo:** 2026.2
