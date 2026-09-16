@@ -86,3 +86,6 @@ Ver [docs/Proposta.md](docs/Proposta.md).
 ## Backlog
 
 Ver [GitHub Projects](https://github.com/MarceloJoao/PalpiteArena/projects).
+
+## Vídeo de apresentação do projeto
+Ver https://drive.google.com/file/d/15e5muSmkTPvpq0RxuDOFyqRg6K2rqs8r/view?usp=sharing
