@@ -1,4 +1,4 @@
-﻿# Proposta — PalpiteArena
+# Proposta — PalpiteArena
 
 ## 1. Visão do produto
 
@@ -104,7 +104,7 @@ o serviço principal focado apenas na lógica de negócio.
 
 ---
 
-## 8. Corte e integração
+## 8. Coorte e integração
 
 **Disciplina:** DIM0547 — Desenvolvimento de Sistemas Web II
 **Período:** 2026.2
