@@ -1,18 +1,36 @@
-﻿name: CI
+name: CI
 
-# Dispara o CI em todo push ou Pull Request na branch main
+# Dispara em todo push ou Pull Request na branch main e branches de feature
 on:
   push:
-    branches: [main]
+    branches: [main, "feature/**", "sprint-*"]
   pull_request:
     branches: [main]
 
 jobs:
 
-  # Job 1: compila e testa a API Quarkus (Java)
+  # Job 1: compila e testa a API Quarkus (Java) com banco real
   build-api:
     name: Build & Test API (Quarkus/Java)
     runs-on: ubuntu-latest
+
+    # Sobe um PostgreSQL junto com o job para os testes de integracao
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: palpitearena_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        # Aguarda o banco estar pronto antes de iniciar os testes
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
       - name: Baixar o codigo do repositorio
         uses: actions/checkout@v4
@@ -32,6 +50,11 @@ jobs:
 
       - name: Rodar os testes da API
         run: cd api && ./gradlew test
+        env:
+          # Aponta os testes para o banco do CI
+          DATABASE_URL: jdbc:postgresql://localhost:5432/palpitearena_test
+          DATABASE_USER: postgres
+          DATABASE_PASSWORD: postgres
 
   # Job 2: compila e testa o servico Go
   build-go:
@@ -51,3 +74,4 @@ jobs:
 
       - name: Rodar os testes do servico Go
         run: cd services/notificacao && go test ./...
+
