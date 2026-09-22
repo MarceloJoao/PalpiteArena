@@ -1,4 +1,4 @@
-﻿# mise.toml — define as tasks do projeto (similar ao npm scripts ou Makefile)
+# mise.toml — define as tasks do projeto (similar ao npm scripts ou Makefile)
 # Uso: mise run <task>
 
 # Builda apenas a API Quarkus (sem rodar os testes)
@@ -35,3 +35,8 @@ run = "go test ./..."
 [tasks.test]
 description = "Testa todos os servicos"
 depends = ["test:api", "test:go"]
+
+# Sobe o ambiente completo com Docker Compose (banco + api + notificacao)
+[tasks.up]
+description = "Sobe todos os servicos com Docker Compose"
+run = "docker compose up --build"

@@ -1,4 +1,4 @@
-﻿# Binarios Go compilados (nao enviar pro repositorio)
+# Binarios Go compilados (nao enviar pro repositorio)
 services/notificacao/notificacao
 services/notificacao/*.exe
 
@@ -8,3 +8,7 @@ services/notificacao/*.exe
 
 # VS Code
 .vscode/
+
+# Variaveis de ambiente
+.env
+!.env.example

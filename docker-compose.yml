@@ -1,30 +1,53 @@
-﻿# Define todos os containers que sobem juntos com "docker compose up"
 services:
+
+  # Container do banco de dados PostgreSQL
+  db:
+    image: postgres:16
+    env_file: .env    # le as variaveis do arquivo .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+    ports:
+      - "5432:5432"  # porta-do-seu-pc:porta-dentro-do-container
+    volumes:
+      - pgdata:/var/lib/postgresql/data  # persiste os dados mesmo ao reiniciar
+    networks:
+      - arenapro-net
 
   # Container do servico principal (Java + Quarkus)
   api:
     build:
-      context: ./api                           # pasta com o codigo da API
-      dockerfile: src/main/docker/Dockerfile.jvm  # Dockerfile gerado pelo Quarkus
+      context: ./api
+      dockerfile: src/main/docker/Dockerfile.jvm
     ports:
-      - "8080:8080"  # porta-do-seu-pc:porta-dentro-do-container
+      - "8080:8080"
+    env_file: .env
     environment:
-      QUARKUS_HTTP_PORT: 8080  # diz ao Quarkus para escutar na porta 8080
+      QUARKUS_HTTP_PORT: 8080
+      QUARKUS_DATASOURCE_JDBC_URL: ${DATABASE_URL}
+      QUARKUS_DATASOURCE_USERNAME: ${DATABASE_USER}
+      QUARKUS_DATASOURCE_PASSWORD: ${DATABASE_PASSWORD}
     depends_on:
-      - notificacao  # garante que o Go sobe antes da API
+      - db          # banco sobe antes da API
+      - notificacao
     networks:
-      - arenapro-net  # coloca na rede interna compartilhada
+      - arenapro-net
 
   # Container do servico de notificacoes (Go)
   notificacao:
     build:
-      context: ./services/notificacao  # pasta com o codigo Go
+      context: ./services/notificacao
     ports:
-      - "8081:8081"  # porta-do-seu-pc:porta-dentro-do-container
+      - "8081:8081"
     networks:
-      - arenapro-net  # mesma rede — os containers se falam pelo nome do servico
+      - arenapro-net
+
+# Volume nomeado para persistir os dados do banco
+volumes:
+  pgdata:
 
 # Rede interna criada pelo Docker para os containers se comunicarem
 networks:
   arenapro-net:
-    driver: bridge  # modo padrao de rede no Docker
+    driver: bridge

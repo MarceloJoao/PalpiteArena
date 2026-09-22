@@ -108,5 +108,6 @@ o serviço principal focado apenas na lógica de negócio.
 
 **Disciplina:** DIM0547 — Desenvolvimento de Sistemas Web II
 **Período:** 2026.2
+**Coorte de apresentações:** B
 **Repositório:** https://github.com/MarceloJoao/PalpiteArena
 **CI:** passando nos dois stacks (Quarkus e Go) em todo push e PR na branch `main`
