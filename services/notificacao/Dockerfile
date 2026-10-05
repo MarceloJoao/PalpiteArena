@@ -1,6 +1,6 @@
 ﻿# Etapa 1 — compilar o codigo Go
 # Usa a imagem oficial do Go para ter o compilador disponivel
-FROM golang:1.23 AS builder
+FROM golang:1.27 AS builder
 WORKDIR /app
 
 # Copia o arquivo de modulo e o codigo fonte
