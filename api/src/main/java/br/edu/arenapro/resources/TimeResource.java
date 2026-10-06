@@ -60,6 +60,7 @@ public class TimeResource {
             return Response.status(Response.Status.NOT_FOUND).build(); // 404
         }
         existente.setNome(dados.getNome());
+        existente.setEscudoUrl(dados.getEscudoUrl());
         return Response.ok(existente).build(); // 200
     }
 
