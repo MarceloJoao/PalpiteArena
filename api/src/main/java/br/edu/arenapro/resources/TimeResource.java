@@ -9,6 +9,7 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 
+import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
 
@@ -42,7 +43,7 @@ public class TimeResource {
 
     @POST
     @Transactional
-    public Response criar(Time time, @Context UriInfo uriInfo) {
+    public Response criar(@Valid Time time, @Context UriInfo uriInfo) {
         timeRepository.persist(time);
         URI uri = uriInfo.getAbsolutePathBuilder()
                 .path(time.getId().toString())
@@ -54,7 +55,7 @@ public class TimeResource {
     @PUT
     @Path("/{id}")
     @Transactional
-    public Response atualizar(@PathParam("id") Long id, Time dados) {
+    public Response atualizar(@PathParam("id") Long id, @Valid Time dados) {
         Time existente = timeRepository.findById(id);
         if (existente == null) {
             return Response.status(Response.Status.NOT_FOUND).build(); // 404

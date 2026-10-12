@@ -9,6 +9,7 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 
+import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
 
@@ -42,7 +43,7 @@ public class UsuarioResource {
     // POST /usuarios → 201 com Location
     @POST
     @Transactional
-    public Response criar(Usuario usuario, @Context UriInfo uriInfo) {
+    public Response criar(@Valid Usuario usuario, @Context UriInfo uriInfo) {
         usuarioRepository.persist(usuario);
         URI uri = uriInfo.getAbsolutePathBuilder()
                 .path(usuario.getId().toString())
@@ -54,7 +55,7 @@ public class UsuarioResource {
     @PUT
     @Path("/{id}")
     @Transactional
-    public Response atualizar(@PathParam("id") Long id, Usuario dados) {
+    public Response atualizar(@PathParam("id") Long id, @Valid Usuario dados) {
         Usuario existente = usuarioRepository.findById(id);
         if (existente == null) {
             return Response.status(Response.Status.NOT_FOUND).build(); // 404

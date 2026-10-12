@@ -9,6 +9,7 @@ import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
+import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
 
@@ -43,7 +44,7 @@ public class PartidaResource {
 
     @POST
     @Transactional
-    public Response criar(Partida partida, @Context UriInfo uriInfo) {
+    public Response criar(@Valid Partida partida, @Context UriInfo uriInfo) {
         partidaRepository.persist(partida);
 
         URI uri = uriInfo.getAbsolutePathBuilder().path(partida.getId().toString()).build();
@@ -54,7 +55,7 @@ public class PartidaResource {
     @PUT
     @Path("/{id}")
     @Transactional
-    public Response atualizar(@PathParam("id") Long id, Partida partida) {
+    public Response atualizar(@PathParam("id") Long id, @Valid Partida partida) {
         Partida existente = partidaRepository.findById(id);
 
         if(existente == null){

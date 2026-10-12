@@ -9,6 +9,7 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 
+import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.List;
 
@@ -53,7 +54,7 @@ public class PalpiteResource {
     // POST /palpites → 201 com Location
     @POST
     @Transactional
-    public Response criar(Palpite palpite, @Context UriInfo uriInfo) {
+    public Response criar(@Valid Palpite palpite, @Context UriInfo uriInfo) {
         palpiteRepository.persist(palpite);
         URI uri = uriInfo.getAbsolutePathBuilder()
                 .path(palpite.getId().toString())
@@ -65,7 +66,7 @@ public class PalpiteResource {
     @PUT
     @Path("/{id}")
     @Transactional
-    public Response atualizar(@PathParam("id") Long id, Palpite dados) {
+    public Response atualizar(@PathParam("id") Long id, @Valid Palpite dados) {
         Palpite existente = palpiteRepository.findById(id);
         if (existente == null) {
             return Response.status(Response.Status.NOT_FOUND).build(); // 404

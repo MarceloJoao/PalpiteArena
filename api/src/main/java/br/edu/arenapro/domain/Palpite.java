@@ -1,6 +1,8 @@
 package br.edu.arenapro.domain;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.time.LocalDateTime;
 
 // Entidade que representa o palpite de um usuário em uma partida
@@ -12,7 +14,7 @@ public class Palpite {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-
+    @NotBlank(message = "O placar previsto é obrigatório")
     @Column(name = "placar_previsto", nullable = false)
     private String placarprevisto;
 
@@ -24,12 +26,12 @@ public class Palpite {
     @Column(name = "criado_em")
     private LocalDateTime criadoEm = LocalDateTime.now();
 
-    // Relacionamento N:1 — muitos palpites pertencem a uma partida
+    @NotNull(message = "A partida é obrigatória")
     @ManyToOne
     @JoinColumn(name = "partida_id", nullable = false)
     private Partida partida;
 
-    // Relacionamento N:1 — muitos palpites pertencem a um usuário
+    @NotNull(message = "O usuário é obrigatório")
     @ManyToOne
     @JoinColumn(name = "usuario_id", nullable = false)
     private Usuario usuario;

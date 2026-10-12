@@ -2,6 +2,7 @@ package br.edu.arenapro.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotNull;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -14,23 +15,24 @@ public class Partida {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // Relacionamento N:1 — muitas partidas podem ter o mesmo time em casa
+    @NotNull(message = "O time da casa é obrigatório")
     @ManyToOne
     @JoinColumn(name = "time_casa_id", nullable = false)
     private Time timeCasa;
 
-    // Relacionamento N:1 — muitas partidas podem ter o mesmo time fora
+    @NotNull(message = "O time visitante é obrigatório")
     @ManyToOne
     @JoinColumn(name = "time_fora_id", nullable = false)
     private Time timeFora;
 
+    @NotNull(message = "A data da partida é obrigatória")
     @Column(name = "data", nullable = false)
     private LocalDateTime data;
 
     // Placar pode ser nulo antes da partida terminar (ex: "2x1")
     private String placar;
 
-    // EnumType.STRING salva o texto no banco ("AGENDADA")
+    @NotNull(message = "O status da partida é obrigatório")
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private StatusPartida status = StatusPartida.AGENDADA;

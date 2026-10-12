@@ -2,6 +2,8 @@ package br.edu.arenapro.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
 import java.util.List;
 
 // Entidade que representa um usuário da plataforma
@@ -13,13 +15,16 @@ public class Usuario {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @NotBlank(message = "O nome é obrigatório")
     @Column(nullable = false)
     private String nome;
 
-    // unique = true garante que não existam dois usuários com o mesmo email
+    @NotBlank(message = "O email é obrigatório")
+    @Email(message = "Formato de email inválido")
     @Column(nullable = false, unique = true)
     private String email;
 
+    @NotBlank(message = "A senha é obrigatória")
     @Column(nullable = false)
     private String senha;
 

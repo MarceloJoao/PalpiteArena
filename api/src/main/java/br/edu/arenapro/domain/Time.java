@@ -1,7 +1,7 @@
 package br.edu.arenapro.domain;
 
 import jakarta.persistence.*;
-import java.util.List;
+import jakarta.validation.constraints.NotBlank;
 
 // Entidade que representa um time de futebol
 @Entity
@@ -12,6 +12,7 @@ public class Time {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @NotBlank(message = "O nome do time é obrigatório")
     @Column(nullable = false, unique = true)
     private String nome;
 
