@@ -15,6 +15,9 @@ public class Time {
     @Column(nullable = false, unique = true)
     private String nome;
 
+    @Column(name = "escudo_url")
+    private String escudoUrl;
+
     // --- Getters e Setters ---
 
     public Long getId() {
@@ -31,5 +34,13 @@ public class Time {
 
     public void setNome(String nome) {
         this.nome = nome;
+    }
+
+    public String getEscudoUrl() {
+        return escudoUrl;
+    }
+
+    public void setEscudoUrl(String escudoUrl) {
+        this.escudoUrl = escudoUrl;
     }
 }

@@ -85,6 +85,7 @@ public class TimeResource {
         }
         Time time = new Time();
         time.setNome(nome);
+        time.setEscudoUrl(corpo.escudoUrl());
         timeRepository.persist(time);
         URI uri = uriInfo.getAbsolutePathBuilder()
                 .path(time.getId().toString())
@@ -115,6 +116,7 @@ public class TimeResource {
             throw new ConflitoException("Já existe um time com o nome '" + nome + "'.");
         }
         existente.setNome(nome);
+        existente.setEscudoUrl(corpo.escudoUrl());
         return Response.ok(existente).build(); // 200
     }
 

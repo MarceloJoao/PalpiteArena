@@ -7,5 +7,8 @@ import org.eclipse.microprofile.openapi.annotations.media.Schema;
 @Schema(name = "TimeRequest", description = "Dados para criar ou atualizar um time")
 public record TimeRequest(
         @NotBlank @Size(max = 255)
-        @Schema(example = "Flamengo") String nome) {
+        @Schema(example = "Flamengo") String nome,
+
+        @Size(max = 255)
+        @Schema(example = "https://exemplo.com/escudo.png") String escudoUrl) {
 }

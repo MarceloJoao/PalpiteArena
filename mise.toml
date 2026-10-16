@@ -5,7 +5,7 @@
 [tasks."build:api"]
 description = "Builda a API Quarkus"
 dir = "api"
-run = "./gradlew build -x test"
+run = "gradlew build -x test"
 
 # Builda apenas o servico Go
 [tasks."build:go"]
@@ -23,7 +23,7 @@ depends = ["build:api", "build:go"]
 [tasks."test:api"]
 description = "Testa a API Quarkus"
 dir = "api"
-run = "./gradlew test"
+run = "gradlew test"
 
 # Roda os testes do servico Go
 [tasks."test:go"]
