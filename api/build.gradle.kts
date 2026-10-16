@@ -24,6 +24,7 @@ dependencies {
     implementation("io.quarkus:quarkus-smallrye-openapi")
     testImplementation("io.quarkus:quarkus-junit")
     testImplementation("io.rest-assured:rest-assured")
+    testImplementation("com.tngtech.archunit:archunit-junit5:1.4.0")
 }
 
 group = "br.edu.arenapro"
