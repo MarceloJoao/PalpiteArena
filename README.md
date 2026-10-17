@@ -195,4 +195,4 @@ A API rejeita dados inválidos retornando o formato padronizado `application/pro
 * **Quadro da Sprint (GitHub Projects):** [PalpiteArena Backlog & Sprints](https://github.com/MarceloJoao/PalpiteArena/projects)
 * **Documentação de Arquitetura:** [docs/Proposta.md](docs/Proposta.md)
 * **Vídeo de Demonstração (Sprint 0):** [Apresentação da Proposta (Google Drive)](https://drive.google.com/file/d/15e5muSmkTPvpq0RxuDOFyqRg6K2rqs8r/view?usp=sharing)
-* **Vídeo de Demonstração (Sprint 1):** *(Inserir link do vídeo de 5 minutos aqui)*
+* **Vídeo de Demonstração (Sprint 1):** *([Apresentação sprint 1](https://drive.google.com/file/d/1AixQI5D8RF-haknZz9uLRsh3ehOi13NP/view?usp=sharing))*
