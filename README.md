@@ -11,7 +11,7 @@ Monorepo da plataforma **PalpiteArena** — sistema de palpites esportivos onde 
 | Nome | Matrícula | GitHub |
 |---|---|---|
 | **Antonnione Coelho** | 20250041045 | [@antonionne-coelho](https://github.com/antonionne-coelho) |
-| **João Marcelo de Sousa** | 20220030819 | [@MarceloJoao](https://github.com/MarceloJoao) |
+| **João Marcelo de Souza** | 20220030819 | [@MarceloJoao](https://github.com/MarceloJoao) |
 
 * **Disciplina:** DIM0547 — Desenvolvimento de Sistemas Web II
 * **Período:** 2026.2 — UFRN
