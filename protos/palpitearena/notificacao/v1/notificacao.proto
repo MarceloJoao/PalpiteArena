@@ -1,0 +1,41 @@
+// Contrato Protobuf da plataforma PalpiteArena para o servico de notificacoes.
+syntax = "proto3";
+
+// Pacote versionado conforme a convencao exigida: <produto>.<servico>.<versao>
+package palpitearena.notificacao.v1;
+
+// Opcao para compatibilidade com importacoes em Go
+option go_package = "github.com/arenapro/notificacao/internal/pb/palpitearena/notificacao/v1;notificacaov1";
+
+// Servico responsavel pelo processamento e despacho de notificacoes aos usuarios.
+service NotificacaoService {
+  // Envia a notificacao com o resultado apurado do palpite de um usuario.
+  rpc NotificarResultadoPalpite (NotificarResultadoPalpiteRequest) returns (NotificarResultadoPalpiteResponse);
+}
+
+// Requisicao enviada pela API principal com os detalhes da apuracao do palpite.
+message NotificarResultadoPalpiteRequest {
+  // Endereco de e-mail do usuario destinatario.
+  string destinatario = 1;
+
+  // Pontuacao obtida pelo usuario com base no placar oficial.
+  int32 pontos = 2;
+
+  // Descricao legivel da partida (exemplo: "Flamengo x Vasco").
+  string partida_descricao = 3;
+
+  // Placar oficial registrado ao final da partida (exemplo: "2x1").
+  string placar = 4;
+}
+
+// Resposta devolvida pelo servico de notificacoes indicando o recebimento da solicitacao.
+message NotificarResultadoPalpiteResponse {
+  // Identificador unico gerado para a notificacao processada.
+  string notificacao_id = 1;
+
+  // Indicador booleano que sinaliza se a notificacao foi enfileirada/enviada com sucesso.
+  bool sucesso = 2;
+
+  // Mensagem textual com detalhes do status da operacao.
+  string mensagem = 3;
+}

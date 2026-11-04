@@ -1,9 +1,9 @@
 name: CI
 
-# Dispara em todo push ou Pull Request na branch main e branches de feature
+# Dispara em todo push ou Pull Request na branch main e branches de feature/sprint
 on:
   push:
-    branches: [main, "feature/**", "sprint-*"]
+    branches: [main, "feature/**", "sprint-*", "sprint-**"]
   pull_request:
     branches: [main]
 
@@ -56,22 +56,28 @@ jobs:
           DATABASE_USER: postgres
           DATABASE_PASSWORD: postgres
 
-  # Job 2: compila e testa o servico Go
+  # Job 2: valida o contrato Protobuf (buf lint) e testa o servico Go
   build-go:
-    name: Build & Test Go Service
+    name: Lint Proto & Test Go Service
     runs-on: ubuntu-latest
     steps:
       - name: Baixar o codigo do repositorio
         uses: actions/checkout@v4
 
-      - name: Configurar Go 1.23
+      - name: Instalar Buf CLI
+        uses: bufbuild/buf-setup-action@v1
+
+      - name: Validar contrato Protobuf (buf lint)
+        run: cd protos && buf lint
+
+      - name: Configurar Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version-file: "services/notificacao/go.mod"
+          cache-dependency-path: "services/notificacao/go.sum"
 
       - name: Compilar o servico Go
         run: cd services/notificacao && go build ./...
 
       - name: Rodar os testes do servico Go
-        run: cd services/notificacao && go test ./...
-
+        run: cd services/notificacao && go test -v ./...

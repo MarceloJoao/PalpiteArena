@@ -1,24 +1,25 @@
-﻿# Etapa 1 — compilar o codigo Go
-# Usa a imagem oficial do Go para ter o compilador disponivel
+# Etapa 1 — compilar o codigo Go
 FROM golang:1.27 AS builder
 WORKDIR /app
 
-# Copia o arquivo de modulo e o codigo fonte
-COPY go.mod ./
-COPY *.go ./
+# Baixa as dependencias primeiro para aproveitar o cache de camadas do Docker
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Compila e gera o binario chamado "notificacao"
-RUN go build -o notificacao .
+# Copia todo o codigo fonte (incluindo pacotes internos e stubs pb)
+COPY . .
+
+# Compila e gera o binario estatico chamado "notificacao"
+RUN CGO_ENABLED=0 GOOS=linux go build -o notificacao .
 
 # Etapa 2 — imagem final (minima, sem o compilador)
-# Usa uma imagem Debian bem leve para rodar apenas o binario
 FROM debian:bookworm-slim
 WORKDIR /app
 
 # Copia somente o binario gerado na etapa anterior
 COPY --from=builder /app/notificacao .
 
-# Porta que o servico vai escutar
+# Porta que o servico gRPC vai escutar
 EXPOSE 8081
 
 # Comando que roda quando o container inicia
