@@ -64,10 +64,11 @@ jobs:
       - name: Baixar o codigo do repositorio
         uses: actions/checkout@v4
 
-      - name: Configurar Buf e rodar buf lint
-        uses: bufbuild/buf-action@v1
-        with:
-          input: protos
+      - name: Instalar Buf CLI
+        uses: bufbuild/buf-setup-action@v1
+
+      - name: Validar contrato Protobuf (buf lint)
+        run: cd protos && buf lint
 
       - name: Configurar Go
         uses: actions/setup-go@v5
