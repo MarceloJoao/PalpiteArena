@@ -24,6 +24,11 @@ public class PalpiteRepository implements PanacheRepository<Palpite> {
                 .list();
     }
 
+    // Busca todos os palpites de uma partida para apuração ao final do jogo
+    public List<Palpite> listarTodosPorPartida(Long partidaId) {
+        return find("partida.id", partidaId).list();
+    }
+
     // Busca todos os palpites com paginação
     public List<Palpite> listarTodos(int pagina, int tamanho) {
         return findAll()

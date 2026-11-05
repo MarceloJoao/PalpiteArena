@@ -6,6 +6,8 @@ package palpitearena.notificacao.v1;
 
 // Opcao para compatibilidade com importacoes em Go
 option go_package = "github.com/arenapro/notificacao/internal/pb/palpitearena/notificacao/v1;notificacaov1";
+option java_multiple_files = true;
+option java_package = "br.edu.arenapro.notificacao.v1";
 
 // Servico responsavel pelo processamento e despacho de notificacoes aos usuarios.
 service NotificacaoService {
