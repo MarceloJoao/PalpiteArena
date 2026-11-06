@@ -31,9 +31,10 @@ func main() {
 
 	servidorGRPC := grpc.NewServer()
 
-	// 1. Injecao de dependencias: Infra -> Dominio -> Adaptador gRPC
+	// 1. Injecao de dependencias: Infra (Console + API Externa TheSportsDB) -> Dominio -> Adaptador gRPC
 	enviador := infra.NovoEnviadorConsole()
-	servicoDominio := dominio.NovoServicoNotificacao(enviador)
+	buscador := infra.NovoBuscadorTheSportsDB(os.Getenv("SPORTSDB_API_URL"))
+	servicoDominio := dominio.NovoServicoCompleto(enviador, buscador)
 	adaptador := grpcadapter.NovoServidorNotificacao(servicoDominio)
 	notificacaov1.RegisterNotificacaoServiceServer(servidorGRPC, adaptador)
 
@@ -57,7 +58,7 @@ func main() {
 		servidorGRPC.GracefulStop()
 	}()
 
-	log.Printf("Servico de notificacoes gRPC escutando em :%s", porta)
+	log.Printf("Servico de notificacoes e resultados gRPC escutando em :%s", porta)
 	if err := servidorGRPC.Serve(ouvinte); err != nil {
 		log.Fatalf("erro no servidor gRPC: %v", err)
 	}

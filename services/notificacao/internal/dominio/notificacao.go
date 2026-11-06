@@ -8,14 +8,15 @@ import (
 	"time"
 )
 
-// Erros de domínio nomeados (sentinel errors)
-// Em Go, definir erros com errors.New permite usar errors.Is(err, ErrDestinatarioInvalido)
+// Erros de dominio nomeados (sentinel errors)
 var (
-	ErrDestinatarioInvalido = errors.New("destinatario invalido ou vazio")
-	ErrAssuntoVazio         = errors.New("assunto nao pode ser vazio")
-	ErrMensagemVazia        = errors.New("mensagem nao pode ser vazia")
-	ErrEnvioFalhou          = errors.New("falha ao despachar notificacao")
-	ErrPrazoExcedido        = errors.New("tempo limite excedido para envio")
+	ErrDestinatarioInvalido  = errors.New("destinatario invalido ou vazio")
+	ErrAssuntoVazio          = errors.New("assunto nao pode ser vazio")
+	ErrMensagemVazia         = errors.New("mensagem nao pode ser vazia")
+	ErrEnvioFalhou           = errors.New("falha ao despachar notificacao")
+	ErrPrazoExcedido         = errors.New("tempo limite excedido para operacao")
+	ErrTimesInvalidos        = errors.New("nomes dos times da casa e de fora sao obrigatorios")
+	ErrConsultaExternaFalhou = errors.New("falha ao consultar resultado na API externa")
 )
 
 // TipoNotificacao define a categoria do evento disparado
@@ -36,15 +37,28 @@ type Notificacao struct {
 	EnviadaEm    time.Time
 }
 
-// EnviadorDeEmail e a porta de saida (interface pequena de acordo com Clean Architecture).
-// O dominio nao sabe se o envio e por SMTP, Resend ou SendGrid. Ele so depende desta interface.
+// ResultadoPartidaExterno representa o resultado oficial obtido de uma fonte externa de esportes
+type ResultadoPartidaExterno struct {
+	Encontrada  bool
+	Finalizada  bool
+	Placar      string
+	FonteEvento string
+}
+
+// EnviadorDeEmail e a porta de saida para envio de e-mail
 type EnviadorDeEmail interface {
 	Enviar(ctx context.Context, para, assunto, corpo string) error
 }
 
-// ServicoNotificacao orquestra as regras de negocio de notificacao
+// BuscadorResultadoPartida e a porta de saida para consultar placares em API externa (ex: TheSportsDB)
+type BuscadorResultadoPartida interface {
+	BuscarResultado(ctx context.Context, timeCasa, timeFora string) (*ResultadoPartidaExterno, error)
+}
+
+// ServicoNotificacao orquestra as regras de negocio de notificacao e consulta externa
 type ServicoNotificacao struct {
 	enviador EnviadorDeEmail
+	buscador BuscadorResultadoPartida
 }
 
 // NovoServicoNotificacao constroi o servico injetando o enviador de email
@@ -54,8 +68,15 @@ func NovoServicoNotificacao(enviador EnviadorDeEmail) *ServicoNotificacao {
 	}
 }
 
+// NovoServicoCompleto constroi o servico injetando o enviador de email e o buscador externo de resultados
+func NovoServicoCompleto(enviador EnviadorDeEmail, buscador BuscadorResultadoPartida) *ServicoNotificacao {
+	return &ServicoNotificacao{
+		enviador: enviador,
+		buscador: buscador,
+	}
+}
+
 // NotificarResultadoPalpite valida as regras e dispara o email para o usuario
-// O primeiro parametro e obrigatoriamente context.Context (exigencia do professor e boa pratica em Go)
 func (s *ServicoNotificacao) NotificarResultadoPalpite(
 	ctx context.Context,
 	destinatario string,
@@ -64,7 +85,6 @@ func (s *ServicoNotificacao) NotificarResultadoPalpite(
 	placar string,
 ) (*Notificacao, error) {
 
-	// 1. Validacao de regras de entrada
 	destinatario = strings.TrimSpace(destinatario)
 	if destinatario == "" || !strings.Contains(destinatario, "@") {
 		return nil, fmt.Errorf("%w: '%s'", ErrDestinatarioInvalido, destinatario)
@@ -75,7 +95,6 @@ func (s *ServicoNotificacao) NotificarResultadoPalpite(
 		return nil, fmt.Errorf("%w: partida nao informada", ErrMensagemVazia)
 	}
 
-	// 2. Verificar se o contexto ja foi cancelado ou expirou antes de comecar
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrPrazoExcedido, err)
 	}
@@ -88,9 +107,7 @@ func (s *ServicoNotificacao) NotificarResultadoPalpite(
 		pontos,
 	)
 
-	// 3. Chamar a porta de saida (enviador de email), passando o contexto
 	if err := s.enviador.Enviar(ctx, destinatario, assunto, corpo); err != nil {
-		// Encapsulando o erro com %w para permitir inspecao com errors.Is / errors.As
 		return nil, fmt.Errorf("%w: %w", ErrEnvioFalhou, err)
 	}
 
@@ -104,4 +121,36 @@ func (s *ServicoNotificacao) NotificarResultadoPalpite(
 	}
 
 	return notificacao, nil
+}
+
+// ConsultarResultadoPartida consulta a porta de saida da API externa de esportes respeitando o contexto
+func (s *ServicoNotificacao) ConsultarResultadoPartida(
+	ctx context.Context,
+	timeCasa string,
+	timeFora string,
+) (*ResultadoPartidaExterno, error) {
+	timeCasa = strings.TrimSpace(timeCasa)
+	timeFora = strings.TrimSpace(timeFora)
+
+	if timeCasa == "" || timeFora == "" {
+		return nil, fmt.Errorf("%w: timeCasa='%s', timeFora='%s'", ErrTimesInvalidos, timeCasa, timeFora)
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrPrazoExcedido, err)
+	}
+
+	if s.buscador == nil {
+		return nil, fmt.Errorf("%w: buscador externo nao configurado", ErrConsultaExternaFalhou)
+	}
+
+	resultado, err := s.buscador.BuscarResultado(ctx, timeCasa, timeFora)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: %w", ErrPrazoExcedido, err)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrConsultaExternaFalhou, err)
+	}
+
+	return resultado, nil
 }

@@ -152,6 +152,29 @@ public class PartidaResource {
        return Response.noContent().build();
     }
 
+    @POST
+    @Path("/{id}/apurar")
+    @Transactional
+    @Operation(summary = "Consulta o placar oficial na API externa via serviço Go, finaliza a partida e apura os palpites")
+    @APIResponse(responseCode = "200", description = "Partida apurada com o resultado externo e palpites pontuados",
+            content = @Content(schema = @Schema(implementation = Partida.class)))
+    @APIResponse(responseCode = "404", ref = "NaoEncontrado")
+    @APIResponse(responseCode = "422", ref = "RegraNegocio")
+    @APIResponse(responseCode = "500", ref = "ErroInterno")
+    public Response apurarResultadoExterno(@Parameter(description = "Id da partida") @PathParam("id") Long id) {
+        Partida partida = partidaRepository.findById(id);
+        if (partida == null) {
+            throw new RecursoNaoEncontradoException("Partida", id);
+        }
+        String placarExterno = notificador.consultarPlacarExterno(partida)
+                .orElseThrow(() -> new RegraNegocioException(
+                        "Não foi possível obter um placar finalizado na API externa para " + partida.getDescricao() + "."));
+        partida.setPlacar(placarExterno);
+        partida.setStatus(StatusPartida.FINALIZADA);
+        apurarENotificarPalpitesSeFinalizada(partida);
+        return Response.ok(partida).build();
+    }
+
     // Copia o corpo validado para a entidade, resolvendo os ids dos times
     private void aplicar(Partida partida, PartidaRequest corpo) {
         if (corpo.timeCasaId().equals(corpo.timeForaId())) {

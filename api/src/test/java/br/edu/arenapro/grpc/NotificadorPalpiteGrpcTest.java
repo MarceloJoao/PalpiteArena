@@ -5,10 +5,13 @@ import br.edu.arenapro.domain.Partida;
 import br.edu.arenapro.domain.StatusPartida;
 import br.edu.arenapro.domain.Time;
 import br.edu.arenapro.domain.Usuario;
+import br.edu.arenapro.notificacao.v1.ConsultarResultadoPartidaRequest;
+import br.edu.arenapro.notificacao.v1.ConsultarResultadoPartidaResponse;
 import br.edu.arenapro.notificacao.v1.NotificacaoServiceGrpc.NotificacaoServiceImplBase;
 import br.edu.arenapro.notificacao.v1.NotificarResultadoPalpiteRequest;
 import br.edu.arenapro.notificacao.v1.NotificarResultadoPalpiteResponse;
 import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import io.grpc.Server;
 import io.grpc.Status;
 import io.grpc.inprocess.InProcessChannelBuilder;
@@ -18,9 +21,11 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -163,5 +168,133 @@ class NotificadorPalpiteGrpcTest {
         NotificadorPalpiteGrpc cliente = new NotificadorPalpiteGrpc(canalSemServidor, Duration.ofMillis(300));
 
         assertFalse(cliente.notificarResultado(criarPalpiteDeExemplo()));
+    }
+
+    @Test
+    void consultarPlacarExternoDevolvePlacarQuandoPartidaFinalizada() throws IOException {
+        AtomicReference<ConsultarResultadoPartidaRequest> recebido = new AtomicReference<>();
+        NotificadorPalpiteGrpc cliente = criarClienteParaServidor("resultado-externo-ok", new NotificacaoServiceImplBase() {
+            @Override
+            public void consultarResultadoPartida(
+                    ConsultarResultadoPartidaRequest request,
+                    StreamObserver<ConsultarResultadoPartidaResponse> responseObserver) {
+                recebido.set(request);
+                responseObserver.onNext(ConsultarResultadoPartidaResponse.newBuilder()
+                        .setEncontrada(true)
+                        .setFinalizada(true)
+                        .setPlacar("1x0")
+                        .setFonteEvento("Flamengo vs Vasco da Gama (2026-01-22)")
+                        .build());
+                responseObserver.onCompleted();
+            }
+        });
+
+        Optional<String> placar = cliente.consultarPlacarExterno(criarPalpiteDeExemplo().getPartida());
+
+        assertTrue(placar.isPresent());
+        assertEquals("1x0", placar.get());
+        assertNotNull(recebido.get());
+        assertEquals("Flamengo", recebido.get().getTimeCasa());
+        assertEquals("Vasco", recebido.get().getTimeFora());
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "E2E_LIVE", matches = "true")
+    void fluxoPraticoRealComServidorGoEApiExternaTheSportsDB() {
+        ManagedChannel canalReal = ManagedChannelBuilder.forAddress("localhost", 8081)
+                .usePlaintext()
+                .build();
+        canais.add(canalReal);
+        NotificadorPalpiteGrpc clienteReal = new NotificadorPalpiteGrpc(canalReal, Duration.ofSeconds(8));
+
+        Time flamengo = new Time();
+        flamengo.setId(1L);
+        flamengo.setNome("Flamengo");
+
+        Time vasco = new Time();
+        vasco.setId(2L);
+        vasco.setNome("Vasco");
+
+        Partida partida = new Partida();
+        partida.setId(100L);
+        partida.setTimeCasa(flamengo);
+        partida.setTimeFora(vasco);
+        partida.setStatus(StatusPartida.AGENDADA);
+
+        Usuario joao = new Usuario();
+        joao.setId(1L);
+        joao.setNome("Joao Marcelo");
+        joao.setEmail("joao@ufrn.br");
+        joao.setPontuacaoTotal(0);
+
+        Usuario antonnione = new Usuario();
+        antonnione.setId(2L);
+        antonnione.setNome("Antonnione");
+        antonnione.setEmail("antonnione@ufrn.br");
+        antonnione.setPontuacaoTotal(0);
+
+        Usuario pedro = new Usuario();
+        pedro.setId(3L);
+        pedro.setNome("Pedro");
+        pedro.setEmail("pedro@ufrn.br");
+        pedro.setPontuacaoTotal(0);
+
+        Palpite palpiteExato = new Palpite();
+        palpiteExato.setId(101L);
+        palpiteExato.setUsuario(joao);
+        palpiteExato.setPartida(partida);
+        palpiteExato.setPlacarprevisto("1x0");
+
+        Palpite palpiteVencedor = new Palpite();
+        palpiteVencedor.setId(102L);
+        palpiteVencedor.setUsuario(antonnione);
+        palpiteVencedor.setPartida(partida);
+        palpiteVencedor.setPlacarprevisto("2x0");
+
+        Palpite palpiteErrado = new Palpite();
+        palpiteErrado.setId(103L);
+        palpiteErrado.setUsuario(pedro);
+        palpiteErrado.setPartida(partida);
+        palpiteErrado.setPlacarprevisto("0x2");
+
+        List<Palpite> palpites = List.of(palpiteExato, palpiteVencedor, palpiteErrado);
+
+        System.out.println("\n==================================================================");
+        System.out.println("1. PARTIDA CRIADA (ANTES DA APURACAO): " + partida.getDescricao()
+                + " | Status: " + partida.getStatus() + " | Placar: " + partida.getPlacar());
+        for (Palpite p : palpites) {
+            System.out.println("   -> Palpite #" + p.getId() + " de " + p.getUsuario().getNome()
+                    + ": prevê " + p.getPlacarprevisto() + " (Pontos atuais: " + p.getPontosObtidos() + ")");
+        }
+
+        System.out.println("\n2. CONSULTANDO RESULTADO OFICIAL NA API EXTERNA (TheSportsDB) VIA gRPC (Go)...");
+        Optional<String> placarExternoOpt = clienteReal.consultarPlacarExterno(partida);
+        assertTrue(placarExternoOpt.isPresent(), "Deveria ter obtido o placar real da TheSportsDB via servico Go");
+
+        String placarOficial = placarExternoOpt.get();
+        partida.setPlacar(placarOficial);
+        partida.setStatus(StatusPartida.FINALIZADA);
+        System.out.println("   -> Placar oficial retornado pela TheSportsDB: " + placarOficial);
+        System.out.println("   -> Partida atualizada: " + partida.getDescricao()
+                + " | Status: " + partida.getStatus() + " | Placar Oficial: " + partida.getPlacar());
+
+        System.out.println("\n3. APURANDO PONTOS DOS PALPITES E ENVIANDO NOTIFICACOES VIA gRPC (Go)...");
+        for (Palpite p : palpites) {
+            int pontos = p.calcularPontos(partida.getPlacar());
+            p.getUsuario().setPontuacaoTotal(p.getUsuario().getPontuacaoTotal() + pontos);
+            boolean notificado = clienteReal.notificarResultado(p);
+            assertTrue(notificado, "Notificacao gRPC deveria ter sido confirmada pelo servico Go");
+            System.out.println("   -> Usuario: " + p.getUsuario().getNome()
+                    + " | Palpite: " + p.getPlacarprevisto()
+                    + " | Placar Real: " + partida.getPlacar()
+                    + " | Pontos Obtidos: " + p.getPontosObtidos()
+                    + " | Pontuacao Total: " + p.getUsuario().getPontuacaoTotal()
+                    + " | Notificado via gRPC: " + notificado);
+        }
+        System.out.println("==================================================================\n");
+
+        assertEquals(3, palpiteExato.getPontosObtidos());
+        assertEquals(1, palpiteVencedor.getPontosObtidos());
+        assertEquals(0, palpiteErrado.getPontosObtidos());
     }
 }

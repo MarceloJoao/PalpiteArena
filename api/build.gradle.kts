@@ -32,8 +32,23 @@ dependencies {
 group = "br.edu.arenapro"
 version = "1.0.0-SNAPSHOT"
 
-// Aponta o gerador de stubs do quarkus-grpc para a pasta ../protos compartilhada com o servico Go
-System.setProperty("quarkus.grpc.codegen.proto-directory", file("../protos").absolutePath)
+// Aponta o gerador de stubs do quarkus-grpc para a pasta ../protos compartilhada com o servico Go.
+// No Windows, o executavel nativo do protoc falha quando o caminho possui acentos (ex.: "Área de Trabalho").
+val caminhoTemAcentoNoWindows = System.getProperty("os.name").lowercase().contains("win") &&
+    !projectDir.absolutePath.all { it.code < 128 }
+
+val pastaProtos = if (caminhoTemAcentoNoWindows) {
+    val tempRoot = File(System.getProperty("java.io.tmpdir"), "palpitearena-build")
+    layout.buildDirectory.set(File(tempRoot, "api-build"))
+    val tempProtos = File(tempRoot, "protos")
+    File(tempProtos, "palpitearena").deleteRecursively()
+    file("../protos").copyRecursively(tempProtos, overwrite = true)
+    tempProtos
+} else {
+    file("../protos")
+}
+
+System.setProperty("quarkus.grpc.codegen.proto-directory", pastaProtos.absolutePath)
 
 java {
     sourceCompatibility = JavaVersion.VERSION_21
@@ -43,4 +58,11 @@ java {
 tasks.withType<JavaCompile> {
     options.encoding = "UTF-8"
     options.compilerArgs.add("-parameters")
+}
+
+tasks.withType<Test> {
+    systemProperty("e2e.live", System.getProperty("e2e.live") ?: "false")
+    testLogging {
+        showStandardStreams = true
+    }
 }

@@ -50,12 +50,35 @@ func (s *ServidorNotificacao) NotificarResultadoPalpite(
 	}, nil
 }
 
+// ConsultarResultadoPartida consulta na API externa o placar oficial entre os dois times.
+func (s *ServidorNotificacao) ConsultarResultadoPartida(
+	ctx context.Context,
+	req *notificacaov1.ConsultarResultadoPartidaRequest,
+) (*notificacaov1.ConsultarResultadoPartidaResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "requisicao nao pode ser nula")
+	}
+
+	resultado, err := s.servico.ConsultarResultadoPartida(ctx, req.GetTimeCasa(), req.GetTimeFora())
+	if err != nil {
+		return nil, traduzirErro(err)
+	}
+
+	return &notificacaov1.ConsultarResultadoPartidaResponse{
+		Encontrada:  resultado.Encontrada,
+		Finalizada:  resultado.Finalizada,
+		Placar:      resultado.Placar,
+		FonteEvento: resultado.FonteEvento,
+	}, nil
+}
+
 // traduzirErro converte erros do dominio em codigos de status gRPC padronizados.
 func traduzirErro(err error) error {
 	switch {
 	case errors.Is(err, dominio.ErrDestinatarioInvalido),
 		errors.Is(err, dominio.ErrAssuntoVazio),
-		errors.Is(err, dominio.ErrMensagemVazia):
+		errors.Is(err, dominio.ErrMensagemVazia),
+		errors.Is(err, dominio.ErrTimesInvalidos):
 		return status.Error(codes.InvalidArgument, err.Error())
 
 	case errors.Is(err, context.DeadlineExceeded),
@@ -66,6 +89,6 @@ func traduzirErro(err error) error {
 		return status.Error(codes.Canceled, err.Error())
 
 	default:
-		return status.Error(codes.Internal, "erro interno ao processar notificacao")
+		return status.Error(codes.Internal, "erro interno ao processar operacao")
 	}
 }
