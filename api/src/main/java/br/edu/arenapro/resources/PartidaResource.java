@@ -1,8 +1,12 @@
 package br.edu.arenapro.resources;
 
+import br.edu.arenapro.domain.NotificadorPalpite;
+import br.edu.arenapro.domain.Palpite;
 import br.edu.arenapro.domain.Partida;
 import br.edu.arenapro.domain.StatusPartida;
 import br.edu.arenapro.domain.Time;
+import br.edu.arenapro.domain.Usuario;
+import br.edu.arenapro.repository.PalpiteRepository;
 import br.edu.arenapro.repository.PartidaRepository;
 import br.edu.arenapro.repository.TimeRepository;
 import br.edu.arenapro.resources.dto.PartidaRequest;
@@ -42,6 +46,12 @@ public class PartidaResource {
 
     @Inject
     TimeRepository timeRepository;
+
+    @Inject
+    PalpiteRepository palpiteRepository;
+
+    @Inject
+    NotificadorPalpite notificador;
 
     @GET
     @Operation(summary = "Lista partidas com paginação e filtro opcional por status")
@@ -118,6 +128,7 @@ public class PartidaResource {
         }
 
         aplicar(existente, corpo);
+        apurarENotificarPalpitesSeFinalizada(existente);
 
         return Response.ok(existente).build();
     }
@@ -160,6 +171,26 @@ public class PartidaResource {
         partida.setPlacar(corpo.placar());
         if (corpo.status() != null) {
             partida.setStatus(corpo.status());
+        }
+    }
+
+    // Quando a partida e finalizada com placar, apura os pontos e dispara as notificacoes via gRPC
+    private void apurarENotificarPalpitesSeFinalizada(Partida partida) {
+        if (partida.getStatus() != StatusPartida.FINALIZADA
+                || partida.getPlacar() == null
+                || partida.getPlacar().isBlank()) {
+            return;
+        }
+        List<Palpite> palpites = palpiteRepository.listarTodosPorPartida(partida.getId());
+        for (Palpite palpite : palpites) {
+            int pontosAnteriores = palpite.getPontosObtidos() != null ? palpite.getPontosObtidos() : 0;
+            int novosPontos = palpite.calcularPontos(partida.getPlacar());
+            Usuario usuario = palpite.getUsuario();
+            if (usuario != null) {
+                int totalAtual = usuario.getPontuacaoTotal() != null ? usuario.getPontuacaoTotal() : 0;
+                usuario.setPontuacaoTotal(Math.max(0, totalAtual - pontosAnteriores + novosPontos));
+            }
+            notificador.notificarResultado(palpite);
         }
     }
 

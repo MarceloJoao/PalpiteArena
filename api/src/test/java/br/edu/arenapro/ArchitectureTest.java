@@ -11,7 +11,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 public class ArchitectureTest {
 
     @Test
-    void dominioNaoDeveDependerDeOutrasCamadas() {
+    void dominioNaoDeveDependerDeOutrasCamadasNemDeGrpc() {
         JavaClasses classes = new ClassFileImporter()
                 .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
                 .importPackages("br.edu.arenapro");
@@ -19,7 +19,15 @@ public class ArchitectureTest {
         ArchRule regraDominio = noClasses()
                 .that().resideInAPackage("..domain..")
                 .should().dependOnClassesThat()
-                .resideInAnyPackage("..repository..", "..resources..");
+                .resideInAnyPackage(
+                        "..repository..",
+                        "..resources..",
+                        "..grpc..",
+                        "io.grpc..",
+                        "com.google.protobuf..",
+                        "br.edu.arenapro.notificacao.."
+                )
+                .because("o domínio não deve depender de repositórios, recursos HTTP nem gRPC/Protobuf");
 
         regraDominio.check(classes);
     }

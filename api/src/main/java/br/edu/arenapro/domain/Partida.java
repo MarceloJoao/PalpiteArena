@@ -97,4 +97,12 @@ public class Partida {
     public void setPalpites(List<Palpite> palpites) {
         this.palpites = palpites;
     }
+
+    /** Retorna a descrição legível da partida (ex.: "Flamengo x Vasco"). */
+    @JsonIgnore
+    public String getDescricao() {
+        String casa = timeCasa != null && timeCasa.getNome() != null ? timeCasa.getNome() : "Time Casa";
+        String fora = timeFora != null && timeFora.getNome() != null ? timeFora.getNome() : "Time Fora";
+        return casa + " x " + fora;
+    }
 }

@@ -22,13 +22,18 @@ dependencies {
     implementation("io.quarkus:quarkus-flyway")
     implementation("io.quarkus:quarkus-hibernate-validator")
     implementation("io.quarkus:quarkus-smallrye-openapi")
+    implementation("io.quarkus:quarkus-grpc")
     testImplementation("io.quarkus:quarkus-junit")
     testImplementation("io.rest-assured:rest-assured")
+    testImplementation("io.grpc:grpc-inprocess")
     testImplementation("com.tngtech.archunit:archunit-junit5:1.4.0")
 }
 
 group = "br.edu.arenapro"
 version = "1.0.0-SNAPSHOT"
+
+// Aponta o gerador de stubs do quarkus-grpc para a pasta ../protos compartilhada com o servico Go
+System.setProperty("quarkus.grpc.codegen.proto-directory", file("../protos").absolutePath)
 
 java {
     sourceCompatibility = JavaVersion.VERSION_21

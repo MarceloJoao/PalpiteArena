@@ -28,6 +28,8 @@ services:
       QUARKUS_DATASOURCE_JDBC_URL: ${DATABASE_URL}
       QUARKUS_DATASOURCE_USERNAME: ${DATABASE_USER}
       QUARKUS_DATASOURCE_PASSWORD: ${DATABASE_PASSWORD}
+      NOTIFICACAO_HOST: notificacao
+      NOTIFICACAO_PORT: ${NOTIFICACAO_PORT:-8081}
     depends_on:
       - db          # banco sobe antes da API
       - notificacao

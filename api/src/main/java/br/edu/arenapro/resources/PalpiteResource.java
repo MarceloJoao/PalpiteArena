@@ -1,5 +1,6 @@
 package br.edu.arenapro.resources;
 
+import br.edu.arenapro.domain.NotificadorPalpite;
 import br.edu.arenapro.domain.Palpite;
 import br.edu.arenapro.domain.Partida;
 import br.edu.arenapro.domain.Usuario;
@@ -47,6 +48,9 @@ public class PalpiteResource {
 
     @Inject
     PartidaRepository partidaRepository;
+
+    @Inject
+    NotificadorPalpite notificador;
 
     // GET /palpites?pagina=0&tamanho=10
     // GET /palpites?usuarioId=1
@@ -141,6 +145,7 @@ public class PalpiteResource {
         existente.setPlacarprevisto(corpo.placarprevisto());
         if (corpo.pontosObtidos() != null) {
             existente.setPontosObtidos(corpo.pontosObtidos());
+            notificador.notificarResultado(existente);
         }
         return Response.ok(existente).build(); // 200
     }

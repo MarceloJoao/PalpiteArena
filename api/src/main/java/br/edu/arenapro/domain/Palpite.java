@@ -83,4 +83,47 @@ public class Palpite {
     public void setUsuario(Usuario usuario) {
         this.usuario = usuario;
     }
+
+    /**
+     * Calcula e atualiza os pontos obtidos pelo palpite com base no placar oficial ("2x1"):
+     * - 3 pontos para placar exato;
+     * - 1 ponto para acerto do vencedor ou empate;
+     * - 0 pontos nos demais casos.
+     */
+    public int calcularPontos(String placarOficial) {
+        if (placarOficial == null || placarprevisto == null) {
+            this.pontosObtidos = 0;
+            return 0;
+        }
+        String oficial = placarOficial.trim().toLowerCase();
+        String previsto = placarprevisto.trim().toLowerCase();
+        if (oficial.equals(previsto)) {
+            this.pontosObtidos = 3;
+            return 3;
+        }
+        int[] golsOficial = extrairGols(oficial);
+        int[] golsPrevisto = extrairGols(previsto);
+        if (golsOficial != null && golsPrevisto != null) {
+            int saldoOficial = Integer.compare(golsOficial[0], golsOficial[1]);
+            int saldoPrevisto = Integer.compare(golsPrevisto[0], golsPrevisto[1]);
+            if (saldoOficial == saldoPrevisto) {
+                this.pontosObtidos = 1;
+                return 1;
+            }
+        }
+        this.pontosObtidos = 0;
+        return 0;
+    }
+
+    private static int[] extrairGols(String placar) {
+        String[] partes = placar.split("x");
+        if (partes.length != 2) {
+            return null;
+        }
+        try {
+            return new int[]{Integer.parseInt(partes[0].trim()), Integer.parseInt(partes[1].trim())};
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
 }
