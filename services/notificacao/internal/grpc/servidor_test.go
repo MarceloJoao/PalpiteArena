@@ -36,6 +36,18 @@ func (e *enviadorTeste) Enviar(ctx context.Context, para, assunto, corpo string)
 	return nil
 }
 
+// buscadorTeste implementa dominio.BuscadorResultadoPartida para os testes do adaptador gRPC.
+type buscadorTeste struct{}
+
+func (b *buscadorTeste) BuscarResultado(ctx context.Context, timeCasa, timeFora string) (*dominio.ResultadoPartidaExterno, error) {
+	return &dominio.ResultadoPartidaExterno{
+		Encontrada:  true,
+		Finalizada:  true,
+		Placar:      "1x0",
+		FonteEvento: timeCasa + " vs " + timeFora,
+	}, nil
+}
+
 // iniciarServidorBufconn sobe um servidor gRPC real em memoria usando bufconn.
 func iniciarServidorBufconn(t *testing.T, enviador dominio.EnviadorDeEmail) *grpc.ClientConn {
 	t.Helper()
@@ -43,7 +55,7 @@ func iniciarServidorBufconn(t *testing.T, enviador dominio.EnviadorDeEmail) *grp
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer()
 
-	servicoDominio := dominio.NovoServicoNotificacao(enviador)
+	servicoDominio := dominio.NovoServicoCompleto(enviador, &buscadorTeste{})
 	adaptador := grpcadapter.NovoServidorNotificacao(servicoDominio)
 	notificacaov1.RegisterNotificacaoServiceServer(srv, adaptador)
 
@@ -150,6 +162,23 @@ func TestServidorGRPC_PrazoExcedidoRetornaDeadlineExceeded(t *testing.T) {
 
 	if st.Code() != codes.DeadlineExceeded {
 		t.Errorf("esperava codigo DEADLINE_EXCEEDED, obteve: %v", st.Code())
+	}
+}
+
+func TestServidorGRPC_ConsultarResultadoPartidaComSucesso(t *testing.T) {
+	conn := iniciarServidorBufconn(t, &enviadorTeste{})
+	cliente := notificacaov1.NewNotificacaoServiceClient(conn)
+
+	resp, err := cliente.ConsultarResultadoPartida(context.Background(), &notificacaov1.ConsultarResultadoPartidaRequest{
+		TimeCasa: "Flamengo",
+		TimeFora: "Vasco",
+	})
+	if err != nil {
+		t.Fatalf("esperava sucesso na consulta de resultado via gRPC, obteve erro: %v", err)
+	}
+
+	if !resp.GetEncontrada() || !resp.GetFinalizada() || resp.GetPlacar() != "1x0" {
+		t.Errorf("resposta inesperada: %+v", resp)
 	}
 }
 

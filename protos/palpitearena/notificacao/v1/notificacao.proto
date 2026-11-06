@@ -1,18 +1,21 @@
-// Contrato Protobuf da plataforma PalpiteArena para o servico de notificacoes.
+// Contrato Protobuf da plataforma PalpiteArena para o servico de notificacoes e resultados externos.
 syntax = "proto3";
 
 // Pacote versionado conforme a convencao exigida: <produto>.<servico>.<versao>
 package palpitearena.notificacao.v1;
 
-// Opcao para compatibilidade com importacoes em Go
+// Opcao para compatibilidade com importacoes em Go e Java
 option go_package = "github.com/arenapro/notificacao/internal/pb/palpitearena/notificacao/v1;notificacaov1";
 option java_multiple_files = true;
 option java_package = "br.edu.arenapro.notificacao.v1";
 
-// Servico responsavel pelo processamento e despacho de notificacoes aos usuarios.
+// Servico responsavel pelo processamento de notificacoes e consulta a API externa de resultados.
 service NotificacaoService {
   // Envia a notificacao com o resultado apurado do palpite de um usuario.
   rpc NotificarResultadoPalpite (NotificarResultadoPalpiteRequest) returns (NotificarResultadoPalpiteResponse);
+
+  // Consulta na API externa de esportes o placar oficial de uma partida entre dois times.
+  rpc ConsultarResultadoPartida (ConsultarResultadoPartidaRequest) returns (ConsultarResultadoPartidaResponse);
 }
 
 // Requisicao enviada pela API principal com os detalhes da apuracao do palpite.
@@ -40,4 +43,28 @@ message NotificarResultadoPalpiteResponse {
 
   // Mensagem textual com detalhes do status da operacao.
   string mensagem = 3;
+}
+
+// Requisicao para buscar o resultado oficial de uma partida na API externa de futebol.
+message ConsultarResultadoPartidaRequest {
+  // Nome do time mandante (exemplo: "Flamengo").
+  string time_casa = 1;
+
+  // Nome do time visitante (exemplo: "Vasco").
+  string time_fora = 2;
+}
+
+// Resposta contendo o placar obtido na API externa de futebol.
+message ConsultarResultadoPartidaResponse {
+  // Indica se uma partida encerrada foi encontrada para o confronto informado.
+  bool encontrada = 1;
+
+  // Indica se a partida ja foi encerrada oficialmente.
+  bool finalizada = 2;
+
+  // Placar oficial no formato "GOLSxGOLS" (exemplo: "1x0").
+  string placar = 3;
+
+  // Descricao do evento retornado pela API externa (exemplo: "Flamengo vs Vasco da Gama").
+  string fonte_evento = 4;
 }
