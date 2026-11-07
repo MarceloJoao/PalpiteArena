@@ -50,6 +50,10 @@ val pastaProtos = if (caminhoTemAcentoNoWindows) {
 
 System.setProperty("quarkus.grpc.codegen.proto-directory", pastaProtos.absolutePath)
 
+tasks.matching { it.name == "quarkusGenerateCode" || it.name == "quarkusGenerateCodeTests" }.configureEach {
+    inputs.dir(pastaProtos)
+}
+
 java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
