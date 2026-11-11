@@ -1,18 +1,21 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/arenapro/notificacao/internal/dominio"
 	grpcadapter "github.com/arenapro/notificacao/internal/grpc"
 	"github.com/arenapro/notificacao/internal/infra"
 	notificacaov1 "github.com/arenapro/notificacao/internal/pb/palpitearena/notificacao/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/reflection"
@@ -22,6 +25,11 @@ func main() {
 	porta := os.Getenv("PORT")
 	if porta == "" {
 		porta = "8081"
+	}
+
+	// Subcomando usado pelo healthcheck do Docker Compose ("/notificacao saude")
+	if len(os.Args) > 1 && os.Args[1] == "saude" {
+		os.Exit(verificarSaude(porta))
 	}
 
 	ouvinte, err := net.Listen("tcp", fmt.Sprintf(":%s", porta))
@@ -62,4 +70,21 @@ func main() {
 	if err := servidorGRPC.Serve(ouvinte); err != nil {
 		log.Fatalf("erro no servidor gRPC: %v", err)
 	}
+}
+
+func verificarSaude(porta string) int {
+	ctx, cancelar := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelar()
+
+	conn, err := grpc.NewClient("localhost:"+porta, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return 1
+	}
+	defer conn.Close()
+
+	resp, err := healthpb.NewHealthClient(conn).Check(ctx, &healthpb.HealthCheckRequest{})
+	if err != nil || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+		return 1
+	}
+	return 0
 }
