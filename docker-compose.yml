@@ -1,47 +1,75 @@
+# Sobe o sistema completo do zero (T8): banco PostgreSQL, servico Go (gRPC) e API Quarkus.
+#   docker compose up --build
+# Cada servico so inicia depois que suas dependencias respondem ao healthcheck (service_healthy).
 services:
 
   # Container do banco de dados PostgreSQL
   db:
-    image: postgres:16
-    env_file: .env    # le as variaveis do arquivo .env
+    image: postgres:16-alpine
+    env_file:
+      - path: .env
+        required: false
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${DATABASE_USER}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-palpitearena}
+      POSTGRES_USER: ${DATABASE_USER:-postgres}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
     ports:
-      - "5432:5432"  # porta-do-seu-pc:porta-dentro-do-container
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data  # persiste os dados mesmo ao reiniciar
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-postgres} -d ${POSTGRES_DB:-palpitearena}"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
     networks:
       - arenapro-net
 
-  # Container do servico principal (Java + Quarkus)
-  api:
-    build:
-      context: ./api
-      dockerfile: src/main/docker/Dockerfile.jvm
-    ports:
-      - "8080:8080"
-    env_file: .env
-    environment:
-      QUARKUS_HTTP_PORT: 8080
-      QUARKUS_DATASOURCE_JDBC_URL: ${DATABASE_URL}
-      QUARKUS_DATASOURCE_USERNAME: ${DATABASE_USER}
-      QUARKUS_DATASOURCE_PASSWORD: ${DATABASE_PASSWORD}
-      NOTIFICACAO_HOST: notificacao
-      NOTIFICACAO_PORT: ${NOTIFICACAO_PORT:-8081}
-    depends_on:
-      - db          # banco sobe antes da API
-      - notificacao
-    networks:
-      - arenapro-net
-
-  # Container do servico de notificacoes (Go)
+  # Container do servico de notificacoes e resultados em Go (gRPC)
   notificacao:
     build:
       context: ./services/notificacao
+      dockerfile: Dockerfile
+    environment:
+      PORT: "8081"
     ports:
-      - "8081:8081"
+      - "${NOTIFICACAO_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD", "/notificacao", "saude"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+    networks:
+      - arenapro-net
+
+  # Container do servico principal (Java 21 + Quarkus)
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      QUARKUS_HTTP_HOST: 0.0.0.0
+      QUARKUS_HTTP_PORT: 8080
+      DATABASE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-palpitearena}
+      DATABASE_USER: ${DATABASE_USER:-postgres}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-palpitearena}
+      QUARKUS_DATASOURCE_USERNAME: ${DATABASE_USER:-postgres}
+      QUARKUS_DATASOURCE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      NOTIFICACAO_HOST: notificacao
+      NOTIFICACAO_PORT: 8081
+    depends_on:
+      db:
+        condition: service_healthy
+      notificacao:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/q/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
     networks:
       - arenapro-net
 

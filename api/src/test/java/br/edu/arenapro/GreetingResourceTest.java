@@ -19,4 +19,13 @@ class GreetingResourceTest {
              .body(is("Hello from Quarkus REST"));
     }
 
+    @Test
+    void testHealthLiveEndpoint() {
+        given()
+          .when().get("/q/health/live")
+          .then()
+             .statusCode(200)
+             .body("status", is("UP"));
+    }
+
 }

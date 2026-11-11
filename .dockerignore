@@ -1,0 +1,6 @@
+.git
+.github
+api/build
+api/.gradle
+services/notificacao/notificacao
+*.exe
