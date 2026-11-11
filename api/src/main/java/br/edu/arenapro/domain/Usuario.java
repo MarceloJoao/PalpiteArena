@@ -1,8 +1,10 @@
 package br.edu.arenapro.domain;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import java.util.List;
+import java.util.Locale;
 
 // Entidade que representa um usuário da plataforma
 @Entity
@@ -20,6 +22,7 @@ public class Usuario {
     @Column(nullable = false, unique = true)
     private String email;
 
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     @Column(nullable = false)
     private String senha;
 
@@ -31,6 +34,27 @@ public class Usuario {
     // Relacionamento 1:N — um usuário tem muitos palpites
     @OneToMany(mappedBy = "usuario", cascade = CascadeType.ALL)
     private List<Palpite> palpites;
+
+    /**
+     * Verifica se a senha informada corresponde à senha cadastrada do usuário.
+     */
+    public boolean conferirSenha(String senhaInformada) {
+        return this.senha != null && senhaInformada != null && this.senha.equals(senhaInformada);
+    }
+
+    /**
+     * Determina o papel do usuário na plataforma (ADMIN para contas administrativas ou TORCEDOR).
+     */
+    public String obterPapel() {
+        if (this.email == null) {
+            return "TORCEDOR";
+        }
+        String emailMin = this.email.trim().toLowerCase(Locale.ROOT);
+        if (emailMin.startsWith("admin@") || emailMin.endsWith("@admin.arenapro.com")) {
+            return "ADMIN";
+        }
+        return "TORCEDOR";
+    }
 
     // --- Getters e Setters ---
 

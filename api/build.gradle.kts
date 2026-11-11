@@ -40,7 +40,7 @@ val caminhoTemAcentoNoWindows = System.getProperty("os.name").lowercase().contai
 
 val pastaProtos = if (caminhoTemAcentoNoWindows) {
     val tempRoot = File(System.getProperty("java.io.tmpdir"), "palpitearena-build")
-    layout.buildDirectory.set(File(tempRoot, "api-build"))
+    layout.buildDirectory.set(File(tempRoot, "build"))
     val tempProtos = File(tempRoot, "protos")
     File(tempProtos, "palpitearena").deleteRecursively()
     file("../protos").copyRecursively(tempProtos, overwrite = true)

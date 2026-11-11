@@ -137,12 +137,27 @@ class ValidacaoErrosOpenApiTest {
     }
 
     @Test
+    void rotaProtegidaSemTokenRetorna401ProblemDetails() {
+        given()
+                .when().get("/auth/eu")
+                .then()
+                .statusCode(401)
+                .contentType(PROBLEM_JSON)
+                .body("status", org.hamcrest.Matchers.is(401))
+                .body("type", org.hamcrest.Matchers.is("/problems/unauthorized"))
+                .body("instance", org.hamcrest.Matchers.is("/auth/eu"));
+    }
+
+    @Test
     void openApiEstaAcessivelEDocumentaOsErros() {
         given().queryParam("format", "json")
                 .when().get("/q/openapi")
                 .then()
                 .statusCode(200)
                 .body("paths", hasKey("/usuarios"))
+                .body("paths", hasKey("/usuarios/ranking"))
+                .body("paths", hasKey("/auth/login"))
+                .body("paths", hasKey("/auth/eu"))
                 .body("paths", hasKey("/times/{id}"))
                 .body("paths", hasKey("/partidas"))
                 .body("paths", hasKey("/palpites"))

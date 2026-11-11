@@ -52,6 +52,22 @@ public class UsuarioResource {
         return usuarioRepository.listarTodos(pagina, tamanho);
     }
 
+    // GET /usuarios/ranking?pagina=0&tamanho=10
+    @GET
+    @Path("/ranking")
+    @Operation(summary = "Lista o ranking de usuários ordenados por pontuação total decrescente")
+    @APIResponse(responseCode = "200", description = "Página do ranking de usuários",
+            content = @Content(schema = @Schema(type = SchemaType.ARRAY, implementation = Usuario.class)))
+    @APIResponse(responseCode = "400", ref = "RequisicaoInvalida")
+    @APIResponse(responseCode = "500", ref = "ErroInterno")
+    public List<Usuario> listarRanking(
+            @Parameter(description = "Número da página, começando em 0")
+            @QueryParam("pagina") @DefaultValue("0") @Min(0) int pagina,
+            @Parameter(description = "Itens por página (1 a 100)")
+            @QueryParam("tamanho") @DefaultValue("10") @Min(1) @Max(100) int tamanho) {
+        return usuarioRepository.listarRanking(pagina, tamanho);
+    }
+
     // GET /usuarios/{id}
     @GET
     @Path("/{id}")
