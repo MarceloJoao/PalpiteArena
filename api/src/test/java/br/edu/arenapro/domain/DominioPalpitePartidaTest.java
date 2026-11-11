@@ -1,10 +1,13 @@
 package br.edu.arenapro.domain;
 
 import java.time.LocalDateTime;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Testes unitários puros das entidades e regras de negócio do domínio (sem banco e sem Quarkus).
@@ -124,5 +127,46 @@ class DominioPalpitePartidaTest {
         assertEquals(0, usuario.getPontuacaoTotal());
         assertEquals(0, palpite.getPontosObtidos());
         assertNotNull(palpite.getCriadoEm());
+    }
+
+    @Test
+    void geradorTokenJwtEmiteEValidaTokenAssinadoComSucesso() {
+        Usuario usuario = new Usuario();
+        usuario.setId(42L);
+        usuario.setNome("João Marcelo");
+        usuario.setEmail("joao@ufrn.br");
+        usuario.setSenha("segredo123");
+
+        GeradorTokenJwt gerador = new GeradorTokenJwt("chave-teste-123", 3600);
+        String token = gerador.gerarToken(usuario);
+
+        Optional<GeradorTokenJwt.DadosTokenJwt> dadosOpt = gerador.validarToken("Bearer " + token);
+
+        assertTrue(dadosOpt.isPresent());
+        assertEquals(42L, dadosOpt.get().usuarioId());
+        assertEquals("João Marcelo", dadosOpt.get().nome());
+        assertEquals("joao@ufrn.br", dadosOpt.get().email());
+        assertEquals("TORCEDOR", dadosOpt.get().papel());
+    }
+
+    @Test
+    void geradorTokenJwtRejeitaAssinaturaAdulteradaEIdentificaAdmin() {
+        Usuario admin = new Usuario();
+        admin.setId(1L);
+        admin.setNome("Administrador");
+        admin.setEmail("admin@arenapro.com");
+        admin.setSenha("admin123");
+
+        GeradorTokenJwt gerador = new GeradorTokenJwt("chave-teste-123", 3600);
+        String token = gerador.gerarToken(admin);
+
+        assertEquals("ADMIN", admin.obterPapel());
+        assertTrue(admin.conferirSenha("admin123"));
+        assertFalse(admin.conferirSenha("errada"));
+
+        // Adultera o último caractere da assinatura
+        String tokenAdulterado = token.substring(0, token.length() - 1) + (token.endsWith("A") ? "B" : "A");
+        assertTrue(gerador.validarToken(tokenAdulterado).isEmpty());
+        assertTrue(gerador.validarToken("").isEmpty());
     }
 }

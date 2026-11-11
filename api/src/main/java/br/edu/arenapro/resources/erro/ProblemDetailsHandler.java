@@ -31,6 +31,7 @@ public class ProblemDetailsHandler {
 
     private static final String TIPO_VALIDACAO = "/problems/validation-error";
     private static final String TIPO_MALFORMADA = "/problems/malformed-request";
+    private static final String TIPO_NAO_AUTORIZADO = "/problems/unauthorized";
     private static final String TIPO_NAO_ENCONTRADO = "/problems/not-found";
     private static final String TIPO_CONFLITO = "/problems/conflict";
     private static final String TIPO_REGRA_NEGOCIO = "/problems/business-rule";
@@ -65,6 +66,12 @@ public class ProblemDetailsHandler {
     @ServerExceptionMapper
     public RestResponse<ProblemDetails> tipoInvalido(MismatchedInputException e, UriInfo uriInfo) {
         return jsonInvalido(e, uriInfo);
+    }
+
+    /** Credenciais invalidas ou token JWT ausente/invalido: 401. */
+    @ServerExceptionMapper
+    public RestResponse<ProblemDetails> naoAutorizado(NaoAutorizadoException e, UriInfo uriInfo) {
+        return resposta(401, TIPO_NAO_AUTORIZADO, "Não autorizado", e.getMessage(), uriInfo, null);
     }
 
     /** Id inexistente: 404. */
