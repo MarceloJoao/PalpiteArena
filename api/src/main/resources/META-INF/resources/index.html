@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PalpiteArena — Plataforma de Palpites Esportivos</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Cabeçalho Principal -->
+  <header class="topo">
+    <div class="topo-interno">
+      <div class="marca">
+        <span class="marca-icone">⚽</span>
+        <h1>Palpite<span>Arena</span></h1>
+      </div>
+
+      <div class="topo-direita">
+        <span id="status-api" class="badge badge-aviso">● Verificando API...</span>
+        <div id="info-usuario-topo">
+          <span class="badge badge-aviso">Visitante (Não autenticado)</span>
+        </div>
+        <a href="/q/swagger-ui" target="_blank" class="link-swagger">Swagger UI ↗</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Navegação por Abas -->
+  <nav class="menu-abas">
+    <button class="aba-btn ativa" data-aba="partidas">🏟️ Partidas &amp; Apuração</button>
+    <button class="aba-btn" data-aba="auth">🔐 Entrar / Cadastrar</button>
+    <button class="aba-btn" data-aba="palpites">🎯 Meus Palpites</button>
+    <button class="aba-btn" data-aba="ranking">🏆 Ranking</button>
+    <button class="aba-btn" data-aba="admin">⚙️ Painel Admin</button>
+  </nav>
+
+  <!-- Conteúdo das Abas -->
+  <main class="container-principal">
+
+
+    <section id="aba-partidas" class="aba-conteudo ativa">
+      <div class="painel-card">
+        <h2>🏟️ Mural de Partidas &amp; Apuração na API Externa</h2>
+        <p>Na Etapa 3 conectaremos aqui a listagem de partidas, envio de palpites e o botão de apuração ao vivo via TheSportsDB (Go + gRPC).</p>
+      </div>
+    </section>
+
+
+    <section id="aba-auth" class="aba-conteudo">
+      <div class="painel-card">
+        <h2>🔐 Autenticação JWT &amp; Cadastro de Torcedor/Admin</h2>
+        <p>Na Etapa 2 colocaremos aqui os formulários de Login (<code>POST /auth/login</code>) e Cadastro (<code>POST /usuarios</code>).</p>
+      </div>
+    </section>
+
+
+    <section id="aba-palpites" class="aba-conteudo">
+      <div class="painel-card">
+        <h2>🎯 Meus Palpites</h2>
+        <p>Espaço reservado para o módulo de histórico e edição de palpites do usuário (<code>GET /palpites?usuarioId=...</code>).</p>
+      </div>
+    </section>
+
+
+    <section id="aba-ranking" class="aba-conteudo">
+      <div class="painel-card">
+        <h2>🏆 Ranking de Torcedores</h2>
+        <p>Espaço reservado para a tabela de classificação geral (<code>GET /usuarios/ranking</code>).</p>
+      </div>
+    </section>
+
+
+    <section id="aba-admin" class="aba-conteudo">
+      <div class="painel-card">
+        <h2>⚙️ Painel Administrativo (Times e Partidas)</h2>
+        <p>Espaço reservado para o cadastro de Times (<code>POST /times</code>) e criação de Partidas (<code>POST /partidas</code>).</p>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Container para alertas flutuantes (Toasts) -->
+  <div id="toast-container"></div>
+
+  <script src="api.js"></script>
+</body>
+</html>
