@@ -40,3 +40,20 @@ depends = ["test:api", "test:go"]
 [tasks.up]
 description = "Sobe todos os servicos com Docker Compose"
 run = "docker compose up --build"
+
+# Para e remove os containers do Docker Compose
+[tasks.down]
+description = "Para todos os servicos do Docker Compose"
+run = "docker compose down"
+
+# Aplica as migracoes Flyway no banco configurado em DATABASE_URL e encerra
+[tasks.migrar]
+description = "Aplica as migracoes Flyway no banco de dados e encerra"
+dir = "api"
+run = "./gradlew build -x test && java -Dpalpitearena.migrar.apenas=true -Dquarkus.http.port=0 -jar build/quarkus-app/quarkus-run.jar"
+
+# Valida o contrato Protobuf com buf lint
+[tasks."buf:lint"]
+description = "Valida o contrato Protobuf com buf lint"
+dir = "protos"
+run = "buf lint"

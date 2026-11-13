@@ -1,0 +1,46 @@
+# Blueprint do Render para a implantacao do PalpiteArena (T10 / Passo 18).
+# O banco PostgreSQL e gerenciado externamente no Neon (https://neon.tech).
+#
+# Limites do plano gratuito do Render (documentados em docs/decisoes/ADR-02-implantacao.md):
+# - servico privado (pserv) nao possui instancia gratuita (exige plano starter pago);
+# - web service gratuito envia, mas nao recebe, trafego pela rede privada interna;
+# - o endereco publico dos web services nao encaminha trafego gRPC (HTTP/2 h2c);
+# - preDeployCommand so esta disponivel em planos pagos (no gratuito, a API aplica
+#   as migracoes Flyway automaticamente na inicializacao ou via comando /app/migrar).
+services:
+  # API Principal (Quarkus / Java 21): publica, com health check em /q/health e
+  # degradacao graciosa quando o microsservico Go nao esta acessivel.
+  - type: web
+    name: palpitearena-api
+    runtime: docker
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /q/health
+    envVars:
+      - key: NOTIFICACAO_HOST
+        value: notificacao
+      - key: NOTIFICACAO_PORT
+        value: "8081"
+      # Segredos do banco gerenciado no Neon: preenchidos no painel do Render (sync: false),
+      # nunca gravados no repositorio.
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_USER
+        sync: false
+      - key: DATABASE_PASSWORD
+        sync: false
+      # Segredo de assinatura de tokens JWT gerado pela plataforma
+      - key: JWT_SECRET
+        generateValue: true
+
+  # Opcional (requer plano Starter pago no Render para rede privada gRPC):
+  # - type: pserv
+  #   name: notificacao
+  #   runtime: image
+  #   image:
+  #     url: ghcr.io/marcelojoao/palpitearena/notificacao:latest
+  #   plan: starter
+  #   envVars:
+  #     - key: PORT
+  #       value: "8081"

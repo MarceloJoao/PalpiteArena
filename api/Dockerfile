@@ -16,5 +16,7 @@ FROM eclipse-temurin:21-jre
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /src/api/build/quarkus-app /app
+# Comando dedicado para aplicar migracoes Flyway e encerrar (Passo 18 / preDeployCommand)
+RUN printf '#!/bin/sh\nexec java -Dpalpitearena.migrar.apenas=true -Dquarkus.http.port=0 -Djava.util.logging.manager=org.jboss.logmanager.LogManager -jar /app/quarkus-run.jar\n' > /app/migrar && chmod +x /app/migrar
 EXPOSE 8080
 CMD ["java", "-Dquarkus.http.host=0.0.0.0", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-jar", "/app/quarkus-run.jar"]

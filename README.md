@@ -1,8 +1,9 @@
 # PalpiteArena ⚽🏆
 
-Monorepo da plataforma **PalpiteArena** — sistema de palpites esportivos onde usuários apostam em placares de partidas de futebol, acumulam pontos e disputam rankings por temporada.
-
 [![CI](https://github.com/MarceloJoao/PalpiteArena/actions/workflows/ci.yml/badge.svg)](https://github.com/MarceloJoao/PalpiteArena/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+Monorepo da plataforma **PalpiteArena** — sistema de bolões e palpites esportivos onde torcedores apostam em placares de partidas de futebol, acumulam pontos automaticamente e disputam rankings por rodada e temporada.
 
 ---
 
@@ -13,157 +14,241 @@ Monorepo da plataforma **PalpiteArena** — sistema de palpites esportivos onde 
 | **Antonnione Coelho** | 20250041045 | [@antonionne-coelho](https://github.com/antonionne-coelho) |
 | **João Marcelo de Souza** | 20220030819 | [@MarceloJoao](https://github.com/MarceloJoao) |
 
-* **Disciplina:** DIM0547 — Desenvolvimento de Sistemas Web II
-* **Período:** 2026.2 — UFRN
+* **Disciplina:** DIM0547 — Desenvolvimento de Sistemas Web II (2026.2 — UFRN)
 * **Docente:** Prof. Francisco Marques Filho
 
 ---
 
-## 📐 Arquitetura e Tecnologias
+## 🎯 O que é o PalpiteArena
 
-O projeto é estruturado em microsserviços em um **monorepo**:
+Organizar bolões de futebol entre amigos ou comunidades costuma depender de planilhas manuais sujeitas a erros de digitação, atrasos na conferência dos placares oficiais e falta de transparência na atualização do ranking. Além disso, os participantes frequentemente esquecem de registrar seus palpites antes do apito inicial ou demoram para descobrir quantos pontos somaram após o término de cada jogo.
 
-* **API Principal (`api/`):**
-  * **Linguagem / Framework:** Java 21, Quarkus 3.39.1
-  * **Persistência & ORM:** Hibernate ORM com Panache, PostgreSQL 16
-  * **Versionamento de Banco:** Flyway (migrações `V1` a `V5`)
-  * **Validação:** Jakarta Bean Validation (`@Valid`, `@NotBlank`, `@Size`, etc.)
-  * **Tratamento de Erros:** Problem Details for HTTP APIs ([RFC 9457](https://datatracker.ietf.org/doc/html/rfc9457)) via `@ServerExceptionMapper`
-  * **Documentação Interativa:** OpenAPI 3.0 e Swagger UI via SmallRye OpenAPI
-* **Serviço de Notificações (`services/notificacao/`):**
-  * **Linguagem:** Go 1.23
-* **Infraestrutura e Orquestração:**
-  * Docker, Docker Compose, GitHub Actions (CI), [mise-en-place](https://mise.jdx.dev/)
+O **PalpiteArena** resolve esse problema oferecendo uma plataforma web e uma API RESTful completas para gerenciar **usuários**, **times**, **partidas** e **palpites**, aplicando regras automáticas de pontuação (**3 pontos** para placar exato, **1 ponto** para acerto do vencedor ou empate e **0 pontos** para erro). Todas as entradas são validadas rigorosamente com retorno padronizado no formato **Problem Details ([RFC 9457](https://datatracker.ietf.org/doc/html/rfc9457))** e autenticação stateless via **JWT (HS256)**.
+
+Na **Sprint 2**, o sistema foi expandido com um microsserviço independente escrito em **Go (`services/notificacao`)**, que se comunica com a API principal em **Java/Quarkus (`api/`)** por meio de **gRPC** com contrato versionado em **Protocol Buffers (`protos/`)**. Esse serviço Go isola o trabalho concorrente de E/S que depende de terceiros — a consulta de placares reais na API externa *TheSportsDB* e o envio assíncrono de notificações por e-mail aos apostadores — garantindo que lentidões ou quedas externas nunca derrubem a API principal.
 
 ---
 
-## 📁 Estrutura de Diretórios
+## 📐 Arquitetura do Sistema
 
-```
-.
-├── .github/workflows/ci.yml # Pipeline de integração contínua (CI com PostgreSQL)
-├── api/                     # Serviço principal (Java 21 + Quarkus)
-│   ├── src/main/java/br/edu/arenapro/
-│   │   ├── domain/          # Entidades JPA (Usuario, Time, Partida, Palpite)
-│   │   ├── repository/      # PanacheRepository com paginação e filtros
-│   │   └── resources/       # Endpoints REST, DTOs e ProblemDetailsHandler
-│   ├── src/main/resources/
-│   │   ├── application.properties
-│   │   └── db/migration/    # Migrações Flyway versionadas (V1 a V5)
-│   └── src/test/java/       # Testes com @QuarkusTest e RestAssured
-├── services/
-│   └── notificacao/         # Microsserviço de notificações (Go)
-├── protos/                  # Contratos de comunicação Protobuf / gRPC
-├── docs/                    # Proposta do projeto e especificações
-├── docker-compose.yml       # Orquestração do ambiente completo (Postgres + Serviços)
-└── mise.toml                # Automação de tarefas (build, test, up)
+O diagrama abaixo ilustra os serviços do monorepo e os protocolos pelos quais eles conversam (**REST/JSON**, **gRPC/Protobuf**, **SQL/JDBC** e **HTTPS**):
+
+```mermaid
+flowchart LR
+    Cliente["Navegador / Cliente HTTP"] -- "REST / JSON + JWT\n(:8080)" --> API["API Principal\n(Java 21 + Quarkus 3.39)"]
+    API -- "SQL / JDBC + Flyway\n(:5432)" --> DB[("PostgreSQL 16\n(Local / Neon)")]
+    API -- "gRPC / Protobuf\ncom deadline de 2s (:8081)" --> GO["Serviço de Notificações\n(Go 1.26)"]
+    GO -- "HTTPS GET\n(context.Context)" --> SPORTS["API Externa\n(TheSportsDB)"]
+    GO -- "Goroutines\n(Concorrência)" --> EMAIL["Disparo de E-mails\nTransacionais"]
 ```
 
+* **API Principal (`api/`):** Java 21, Quarkus 3.39.1, Hibernate ORM com Panache, migrações Flyway (`V1` a `V5`), Bean Validation, Problem Details (RFC 9457), SmallRye OpenAPI/Swagger UI, SmallRye Health (`/q/health`) e cliente gRPC (`quarkus-grpc`).
+* **Serviço Go (`services/notificacao/`):** Go 1.26, servidor gRPC (`google.golang.org/grpc`) com *Health Checking Protocol* (`grpc_health_v1`), *Server Reflection*, encerramento gracioso (`GracefulStop` no `SIGTERM`), *goroutines* concorrentes e respeito estrito a `context.Context`.
+* **Contrato (`protos/`):** Protocol Buffers (`proto3`) no pacote `arenapro.notificacao.v1`, validado com `buf lint` (`STANDARD` e `COMMENTS`).
+
+### Decisões de Arquitetura (ADRs)
+* 📄 **[ADR 01 — Responsabilidade do Microsserviço de Notificações e Resultados em Go](docs/decisoes/ADR-01-responsabilidade-servico-go.md)**
+* 📄 **[ADR 02 — Estratégia de Implantação em Nuvem (Render, Neon e GHCR)](docs/decisoes/ADR-02-implantacao.md)**
+
 ---
 
-## 🚀 Como Executar
+## 🌐 No Ar (Produção)
 
-### Pré-requisitos
-* [Docker](https://www.docker.com/) e Docker Compose
-* [Java 21](https://www.oracle.com/java/technologies/downloads/) (para rodar localmente)
-* [mise](https://mise.jdx.dev/) *(opcional, mas recomendado)*
+A API principal está publicada em container no **Render** conectada a um banco **PostgreSQL gerenciado no Neon** (conforme detalhado na [ADR-02](docs/decisoes/ADR-02-implantacao.md)):
+
+* 🔗 **URL Pública da API / Interface Web:** [https://palpitearena-api.onrender.com](https://palpitearena-api.onrender.com)
+* 📖 **Swagger UI (Interativo no ar):** [https://palpitearena-api.onrender.com/q/swagger-ui](https://palpitearena-api.onrender.com/q/swagger-ui)
+* 📄 **Especificação OpenAPI (JSON/YAML no ar):** [https://palpitearena-api.onrender.com/q/openapi](https://palpitearena-api.onrender.com/q/openapi)
+* 🩺 **Health Check (Liveness + Readiness do Banco):** [https://palpitearena-api.onrender.com/q/health](https://palpitearena-api.onrender.com/q/health)
+
+> **Nota sobre o plano gratuito:** No plano gratuito do Render, a instância hiberna após 15 minutos sem tráfego; a primeira requisição pode levar cerca de 30 a 50 segundos para iniciar (*cold start*). Conforme documentado na [ADR-02](docs/decisoes/ADR-02-implantacao.md), a API em produção opera com **degradação graciosa** sem o serviço Go (que roda junto da API no `docker compose`).
 
 ---
 
-### Opção 1: Ambiente Completo via Docker Compose
+## 🛠️ Pré-requisitos
 
-Para subir o banco de dados PostgreSQL, a API Quarkus e o serviço Go com um único comando:
+Para subir todo o sistema do zero via containers, **basta ter o Docker instalado**:
+
+| Ferramenta | Versão Recomendada | Finalidade |
+|---|---|---|
+| **Docker** & **Docker Compose** | Docker `24+` / Compose `v2+` | Subir banco, serviço Go e API em containers (obrigatório) |
+| **Java (JDK)** | `21` (Eclipse Temurin) | *Opcional* — apenas para rodar a API fora do Docker |
+| **Go** | `1.23+` / `1.26` | *Opcional* — apenas para rodar o serviço Go fora do Docker |
+| **Buf CLI** | `1.47+` | *Opcional* — apenas para validar/regenerar `.proto` localmente |
+| **mise** | `2026+` | *Opcional* — executor de tarefas (`mise.toml`) |
+
+---
+
+## 🚀 Como Rodar
+
+### 1. Subir tudo com um único comando (`docker compose`)
+
+Num clone limpo do repositório, **sem precisar criar arquivo `.env` nem instalar Java ou Go**, execute na raiz do projeto:
 
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
-*(ou se usar o mise: `mise run up`)*
 
----
+O Docker Compose irá:
+1. Subir o banco **PostgreSQL 16** (`db`) e aguardar o `pg_isready` ficar saudável (`healthy`);
+2. Compilar o **serviço Go** (`notificacao`) em dois estágios (`golang:1.26` → `distroless/static:nonroot`, ~25 MB) e aguardar o health check gRPC (`/notificacao saude` → `SERVING`);
+3. Compilar a **API Quarkus** (`api`) em dois estágios (`eclipse-temurin:21-jdk` → `eclipse-temurin:21-jre`), aplicar automaticamente as migrações Flyway (`V1` a `V5`) e aguardar `GET /q/health` responder `UP`.
 
-### Opção 2: Desenvolvimento Local (API Quarkus com Live Reload)
-
-1. **Suba apenas o banco PostgreSQL:**
-   ```bash
-   docker compose up -d db
-   ```
-
-2. **Inicie a API em modo de desenvolvimento:**
-   ```bash
-   cd api
-   ./gradlew quarkusDev
-   ```
-   *(No Windows PowerShell: `.\gradlew.bat quarkusDev`)*
-
-A aplicação estará disponível em `http://localhost:8080`.
-
----
-
-## 📖 Documentação da API (OpenAPI & Swagger UI)
-
-Com a API em execução, acesse a documentação interativa para visualizar esquemas e testar requisições:
-
-* 🌐 **Swagger UI:** [http://localhost:8080/q/swagger-ui](http://localhost:8080/q/swagger-ui)
-* 📄 **OpenAPI Spec (JSON):** [http://localhost:8080/q/openapi](http://localhost:8080/q/openapi)
-
----
-
-## 🛣️ Endpoints Principais (Rotas REST)
-
-A API segue rigorosamente as convenções REST, semântica HTTP (`201 Created` com `Location`, `204 No Content`, `404 Not Found`) e paginação:
-
-| Método | Endpoint | Descrição | Status de Sucesso |
-|---|---|---|---|
-| **Usuários** | | | |
-| `GET` | `/usuarios?pagina=0&tamanho=10` | Lista usuários paginados | `200 OK` |
-| `GET` | `/usuarios/{id}` | Busca usuário por ID | `200 OK` |
-| `POST` | `/usuarios` | Cadastra novo usuário | `201 Created` |
-| `PUT` | `/usuarios/{id}` | Atualiza dados do usuário | `200 OK` |
-| `DELETE` | `/usuarios/{id}` | Remove usuário | `204 No Content` |
-| **Times** | | | |
-| `GET` | `/times?pagina=0&tamanho=10` | Lista times com paginação | `200 OK` |
-| `GET` | `/times/{id}` | Busca time por ID | `200 OK` |
-| `POST` | `/times` | Cadastra novo time (com escudo) | `201 Created` |
-| `PUT` | `/times/{id}` | Atualiza time | `200 OK` |
-| `DELETE` | `/times/{id}` | Remove time | `204 No Content` |
-| **Partidas** | | | |
-| `GET` | `/partidas?pagina=0&tamanho=10` | Lista todas as partidas com paginação | `200 OK` |
-| `GET` | `/partidas?status=AGENDADA` | Filtra partidas por status (`AGENDADA`, `EM_ANDAMENTO`, `ENCERRADA`, `CANCELADA`) | `200 OK` |
-| `GET` | `/partidas/{id}` | Busca partida por ID | `200 OK` |
-| `POST` | `/partidas` | Cadastra nova partida entre dois times | `201 Created` |
-| `PUT` | `/partidas/{id}` | Atualiza placar/status da partida | `200 OK` |
-| `DELETE` | `/partidas/{id}` | Remove partida | `204 No Content` |
-| **Palpites** | | | |
-| `GET` | `/palpites?pagina=0&tamanho=10` | Lista todos os palpites com paginação | `200 OK` |
-| `GET` | `/palpites?usuarioId=1` | Filtra palpites por usuário | `200 OK` |
-| `GET` | `/palpites?partidaId=1` | Filtra palpites por partida | `200 OK` |
-| `GET` | `/palpites/{id}` | Busca palpite por ID | `200 OK` |
-| `POST` | `/palpites` | Registra palpite de um usuário em uma partida | `201 Created` |
-| `PUT` | `/palpites/{id}` | Atualiza placar previsto do palpite | `200 OK` |
-| `DELETE` | `/palpites/{id}` | Remove palpite | `204 No Content` |
-
----
-
-## 🧪 Testes Automatizados
-
-Para executar os testes de validação, tratamento de erros RFC 9457 e semântica HTTP:
+Para conferir que todos os 3 serviços estão saudáveis (`healthy`):
 
 ```bash
-# Via mise (na raiz do projeto)
-mise run test:api
+docker compose ps
+```
 
-# Ou diretamente pelo Gradle
+Saída esperada:
+```text
+NAME                         STATUS                   PORTS
+palpitearena-db-1            Up (healthy)             0.0.0.0:5432->5432/tcp
+palpitearena-notificacao-1   Up (healthy)             0.0.0.0:8081->8081/tcp
+palpitearena-api-1           Up (healthy)             0.0.0.0:8080->8080/tcp
+```
+
+* 🌐 **Aplicação / Front-end:** [http://localhost:8080](http://localhost:8080)
+* 📖 **Swagger UI Local:** [http://localhost:8080/q/swagger-ui](http://localhost:8080/q/swagger-ui)
+* 📄 **OpenAPI Local:** [http://localhost:8080/q/openapi](http://localhost:8080/q/openapi)
+* 🩺 **Health Check Local:** [http://localhost:8080/q/health](http://localhost:8080/q/health)
+
+Para encerrar os containers:
+```bash
+docker compose down
+```
+
+### 2. Variáveis de Ambiente
+
+O `docker-compose.yml` já possui valores padrão prontos para uso local. Caso queira customizar, copie o arquivo [`.env.example`](.env.example) para `.env`:
+
+```bash
+cp .env.example .env
+```
+
+| Variável | Padrão Local / Compose | Descrição |
+|---|---|---|
+| `DATABASE_URL` | `jdbc:postgresql://localhost:5432/palpitearena` | URL JDBC do PostgreSQL (no Neon, inclui `?sslmode=require`) |
+| `DATABASE_USER` | `postgres` | Usuário do banco de dados |
+| `DATABASE_PASSWORD` | `postgres` | Senha do banco de dados |
+| `NOTIFICACAO_HOST` | `localhost` (`notificacao` no compose) | Host do servidor gRPC em Go |
+| `NOTIFICACAO_PORT` | `8081` | Porta TCP do servidor gRPC em Go |
+| `PORT` / `API_PORT` | `8080` | Porta HTTP onde a API Quarkus escuta |
+| `JWT_SECRET` | *(chave padrão de dev)* | Segredo HMAC-SHA256 para assinatura de tokens JWT |
+
+### 3. Aplicar migrações por comando / task
+
+Além da migração automática na subida, é possível aplicar as migrações Flyway e encerrar imediatamente por comando dedicado:
+
+```bash
+# Via mise
+mise run migrar
+
+# Ou via container Docker
+docker compose run --rm api /app/migrar
+```
+
+---
+
+## 🧪 Como Testar
+
+A suíte de testes roda localmente e no GitHub Actions CI com a mesma configuração:
+
+### 1. Testes da API Principal (Quarkus / Java 21)
+
+Com o banco PostgreSQL acessível (por exemplo, `docker compose up -d db`):
+
+```bash
 cd api
 ./gradlew test
 ```
-*(No Windows PowerShell: `.\gradlew.bat test`)*
+*(No Windows PowerShell: `.\gradlew.bat test` ou na raiz: `mise run test:api`)*
+
+**O que a suíte da API cobre (66 testes):**
+* **Unitários de Domínio (`DominioPalpitePartidaTest`):** Regras de cálculo de pontos (`Palpite.calcularPontos`: 3, 1 e 0 pts), formatação de partidas, papéis de usuário e emissão/validação de tokens JWT (`GeradorTokenJwt`) em JUnit 5 puro, sem banco e sem subir o Quarkus.
+* **Unitários de Casos de Uso com Dublês em Memória (`PartidaApuracaoUnitarioTest`, `AutenticacaoUnitarioTest`):** Testam apuração de partidas, consulta externa e login JWT usando repositórios e `NotificadorPalpite` falsos em memória.
+* **Cliente gRPC em Memória (`NotificadorPalpiteGrpcTest`):** Exercita o adaptador `NotificadorPalpiteGrpc` contra um servidor gRPC real em memória (`InProcessServer`), cobrindo sucesso, *deadline* excedido (`DEADLINE_EXCEEDED`), servidor fora do ar (`UNAVAILABLE`) e argumento inválido (`INVALID_ARGUMENT`).
+* **Integração com PostgreSQL Real (`CrudIntegracaoTest`):** Testa o ciclo completo de CRUD (`Time`, `Usuario`, `Partida` e `Palpite`), relacionamentos, paginação (`?pagina=&tamanho=`), filtros (`?status=`, `?usuarioId=`, `?partidaId=`) e apuração no banco PostgreSQL com migrações Flyway.
+* **Validação e OpenAPI (`ValidacaoErrosOpenApiTest`, `GreetingResourceTest`):** Verifica respostas de erro no padrão RFC 9457 (`application/problem+json`), publicação do `/q/openapi` e `/q/health/live`.
+* **Teste de Arquitetura (`ArchitectureTest`):** Regra **ArchUnit** garantindo que o pacote `..domain..` não depende de HTTP (`jakarta.ws.rs`), persistência (`..repository..`, `java.sql`), runtime Quarkus nem gRPC/Protobuf (`io.grpc..`, `com.google.protobuf..`), incluindo teste explícito que detecta a classe `DominioContaminado` de propósito.
+
+### 2. Testes do Microsserviço Go e Lint do Contrato Protobuf
+
+```bash
+# Testes de domínio (respeito a context/deadline, erros) e integração gRPC (bufconn)
+cd services/notificacao
+go test -v ./...
+
+# Lint do contrato Protocol Buffers (regras STANDARD e COMMENTS)
+cd ../../protos
+buf lint
+```
 
 ---
 
-## ⚠️ Padrão de Resposta de Erros (RFC 9457)
+## 💻 Exemplos de Chamadas à API (`curl`)
 
-A API rejeita dados inválidos retornando o formato padronizado `application/problem+json`:
+### 1. Cadastrar um Time (`POST /times`)
 
+```bash
+curl -i -X POST http://localhost:8080/times \
+  -H "Content-Type: application/json" \
+  -d '{"nome": "Flamengo", "escudoUrl": "https://exemplo.com/flamengo.png"}'
+```
+
+**Resposta esperada (`201 Created`):**
+```json
+{
+  "id": 1,
+  "nome": "Flamengo",
+  "escudoUrl": "https://exemplo.com/flamengo.png"
+}
+```
+
+### 2. Cadastrar um Usuário e Autenticar com JWT (`POST /usuarios` e `POST /auth/login`)
+
+```bash
+curl -s -X POST http://localhost:8080/usuarios \
+  -H "Content-Type: application/json" \
+  -d '{"nome": "Antonnione Coelho", "email": "antonnione@ufrn.edu.br", "senha": "senha123"}'
+
+curl -s -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "antonnione@ufrn.edu.br", "senha": "senha123"}'
+```
+
+**Resposta esperada (`200 OK`):**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "tipo": "Bearer",
+  "expiraEmSegundos": 86400,
+  "usuarioId": 1,
+  "nome": "Antonnione Coelho",
+  "email": "antonnione@ufrn.edu.br",
+  "papel": "TORCEDOR"
+}
+```
+
+### 3. Apurar Resultado de Partida e Disparar Notificações gRPC (`POST /partidas/{id}/apurar`)
+
+```bash
+curl -i -X POST http://localhost:8080/partidas/1/apurar \
+  -H "Content-Type: application/json" \
+  -d '{"placar": "2x1"}'
+```
+
+**Resposta esperada (`200 OK`):** Atualiza a partida para `FINALIZADA`, calcula os pontos de todos os palpites registrados, soma na `pontuacaoTotal` de cada usuário e aciona o microsserviço Go via gRPC (com *deadline* de 2s) para enviar os e-mails de resultado.
+
+### 4. Exemplo de Erro Padronizado — Problem Details ([RFC 9457](https://datatracker.ietf.org/doc/html/rfc9457))
+
+```bash
+curl -i -X POST http://localhost:8080/palpites \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+**Resposta esperada (`400 Bad Request` — `application/problem+json`):**
 ```json
 {
   "type": "/problems/validation-error",
@@ -172,27 +257,23 @@ A API rejeita dados inválidos retornando o formato padronizado `application/pro
   "detail": "Um ou mais campos são inválidos. Veja 'errors' para os detalhes.",
   "instance": "/palpites",
   "errors": [
-    {
-      "campo": "partidaId",
-      "mensagem": "não deve ser nulo"
-    },
-    {
-      "campo": "placarprevisto",
-      "mensagem": "não deve estar em branco"
-    },
-    {
-      "campo": "usuarioId",
-      "mensagem": "não deve ser nulo"
-    }
+    { "campo": "partidaId", "mensagem": "não deve ser nulo" },
+    { "campo": "placarprevisto", "mensagem": "não deve estar em branco" },
+    { "campo": "usuarioId", "mensagem": "não deve ser nulo" }
   ]
 }
 ```
 
 ---
 
-## 📋 Gestão do Projeto & Entregas
+## 🎥 Vídeos de Demonstração
 
-* **Quadro da Sprint (GitHub Projects):** [PalpiteArena Backlog & Sprints](https://github.com/MarceloJoao/PalpiteArena/projects)
-* **Documentação de Arquitetura:** [docs/Proposta.md](docs/Proposta.md)
-* **Vídeo de Demonstração (Sprint 0):** [Apresentação da Proposta (Google Drive)](https://drive.google.com/file/d/15e5muSmkTPvpq0RxuDOFyqRg6K2rqs8r/view?usp=sharing)
-* **Vídeo de Demonstração (Sprint 1):** *([Apresentação sprint 1](https://drive.google.com/file/d/1AixQI5D8RF-haknZz9uLRsh3ehOi13NP/view?usp=sharing))*
+* 🎬 **Sprint 2 (Produto Final, Microsserviço Go/gRPC, Compose e Implantação):** *(Link do vídeo de 5 minutos da Sprint 2)*
+* 🎬 **Sprint 1 (API, Persistência, Validação e Testes):** [Apresentação Sprint 1 (Google Drive)](https://drive.google.com/file/d/1AixQI5D8RF-haknZz9uLRsh3ehOi13NP/view?usp=sharing)
+* 🎬 **Sprint 0 (Proposta e Arquitetura):** [Apresentação da Proposta (Google Drive)](https://drive.google.com/file/d/15e5muSmkTPvpq0RxuDOFyqRg6K2rqs8r/view?usp=sharing)
+
+---
+
+## 📄 Licença
+
+Este projeto é distribuído sob a licença **MIT**. Consulte o arquivo [LICENSE](LICENSE) na raiz do repositório para mais detalhes.
