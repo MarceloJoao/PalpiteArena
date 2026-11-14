@@ -7,8 +7,11 @@
 
 const CHAVE_SESSAO = 'palpitearena_sessao';
 
-// Detecta se está rodando dentro do Quarkus (:8080) ou aberto externamente (ex.: Live Server)
-const API_BASE_URL = window.location.port === '8080' ? '' : 'http://localhost:8080';
+// Detecta se está rodando servido pela própria API (local :8080 ou nuvem Render) ou aberto via Live Server / arquivo local
+const API_BASE_URL =
+  window.location.protocol === 'file:' || window.location.port === '5500'
+    ? 'http://localhost:8080'
+    : '';
 
 /**
  * Lê a sessão salva no navegador (token JWT + dados do usuário).

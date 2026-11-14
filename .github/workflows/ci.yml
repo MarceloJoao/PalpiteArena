@@ -49,6 +49,13 @@ jobs:
       - name: Compilar a API
         run: cd api && ./gradlew build -x test
 
+      - name: Aplicar migracoes Flyway por comando (migrar)
+        run: java -Dpalpitearena.migrar.apenas=true -Dquarkus.http.port=0 -jar api/build/quarkus-app/quarkus-run.jar
+        env:
+          DATABASE_URL: jdbc:postgresql://localhost:5432/palpitearena_test
+          DATABASE_USER: postgres
+          DATABASE_PASSWORD: postgres
+
       - name: Rodar os testes da API
         run: cd api && ./gradlew test
         env:
@@ -84,3 +91,42 @@ jobs:
 
       - name: Rodar os testes do servico Go
         run: cd services/notificacao && go test -v ./...
+
+  # Job 3: na branch main, depois que todos os testes passam, publica as imagens no GHCR (Passo 18)
+  publicar-imagens:
+    name: Publish Docker Images (GHCR)
+    needs: [build-api, build-go]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - nome: notificacao
+            contexto: services/notificacao
+            dockerfile: services/notificacao/Dockerfile
+          - nome: api
+            contexto: .
+            dockerfile: api/Dockerfile
+    steps:
+      - name: Baixar o codigo do repositorio
+        uses: actions/checkout@v4
+
+      - name: Login no GitHub Container Registry (ghcr.io)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build e Push da imagem (${{ matrix.nome }})
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.contexto }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ghcr.io/marcelojoao/palpitearena/${{ matrix.nome }}:${{ github.sha }}
+            ghcr.io/marcelojoao/palpitearena/${{ matrix.nome }}:latest
