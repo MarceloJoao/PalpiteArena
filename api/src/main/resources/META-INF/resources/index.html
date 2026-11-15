@@ -38,23 +38,115 @@
   <!-- Conteúdo das Abas -->
   <main class="container-principal">
 
-
+    <!-- ABA 1: MURAL DE PARTIDAS & API EXTERNA (HOJE E AMANHÃ) -->
     <section id="aba-partidas" class="aba-conteudo ativa">
-      <div class="painel-card">
-        <h2>🏟️ Mural de Partidas &amp; Apuração na API Externa</h2>
-        <p>Na Etapa 3 conectaremos aqui a listagem de partidas, envio de palpites e o botão de apuração ao vivo via TheSportsDB (Go + gRPC).</p>
+
+      <!-- Bloco 1: Busca ao Vivo na API Externa (TheSportsDB - Hoje e Amanhã) -->
+      <div class="painel-card painel-destaque">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>🌐 Partidas de Hoje e Amanhã — API Externa (TheSportsDB)</h2>
+            <p>Jogos reais de futebol buscados ao vivo na TheSportsDB. Importe para o banco da Arena com 1 clique para palpitar e testar a apuração via Go/gRPC.</p>
+          </div>
+          <div class="acoes-secao">
+            <button id="btn-hoje-amanha" class="btn btn-secundario" type="button">
+              📅 Hoje e Amanhã
+            </button>
+            <button id="btn-importar-todas" class="btn btn-primario" type="button">
+              📥 Importar Todas para a Arena
+            </button>
+          </div>
+        </div>
+
+        <div class="barra-filtros">
+          <div class="campo-inline">
+            <label for="filtro-data-hoje">Dia 1 (Hoje):</label>
+            <input type="date" id="filtro-data-hoje" class="input-padrao" />
+          </div>
+          <div class="campo-inline">
+            <label for="filtro-data-amanha">Dia 2 (Amanhã):</label>
+            <input type="date" id="filtro-data-amanha" class="input-padrao" />
+          </div>
+          <button id="btn-buscar-externas" class="btn btn-info" type="button">
+            🔍 Buscar na API Externa
+          </button>
+        </div>
+
+        <div id="lista-partidas-externas" class="grade-partidas">
+          <p class="texto-vazio">Carregando partidas de hoje e amanhã na TheSportsDB...</p>
+        </div>
       </div>
+
+      <!-- Bloco 2: Mural de Partidas salvas na API Quarkus (GET /partidas) -->
+      <div class="painel-card">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>🏟️ Mural de Partidas da Arena (Banco Local / Quarkus)</h2>
+            <p>Partidas registradas na API Quarkus (<code>GET /partidas</code>). Envie seu palpite (<code>POST /palpites</code>) ou acione a apuração oficial via microsserviço Go + gRPC (<code>POST /partidas/{id}/apurar</code>).</p>
+          </div>
+          <div class="acoes-secao">
+            <select id="filtro-status-arena" class="input-padrao">
+              <option value="">Todos os Status</option>
+              <option value="AGENDADA">Agendadas (Abertas)</option>
+              <option value="FINALIZADA">Finalizadas (Apuradas)</option>
+            </select>
+            <button id="btn-recarregar-arena" class="btn btn-secundario" type="button">
+              🔄 Atualizar Mural
+            </button>
+          </div>
+        </div>
+
+        <div id="lista-partidas-arena" class="grade-partidas">
+          <p class="texto-vazio">Conecte a API Quarkus na porta 8080 para listar as partidas cadastradas no banco.</p>
+        </div>
+      </div>
+
     </section>
 
-
+    <!-- ABA 2: AUTENTICAÇÃO JWT & CADASTRO -->
     <section id="aba-auth" class="aba-conteudo">
-      <div class="painel-card">
-        <h2>🔐 Autenticação JWT &amp; Cadastro de Torcedor/Admin</h2>
-        <p>Na Etapa 2 colocaremos aqui os formulários de Login (<code>POST /auth/login</code>) e Cadastro (<code>POST /usuarios</code>).</p>
+      <div class="grade-dupla">
+        <!-- Card de Login -->
+        <div class="painel-card">
+          <h2>🔑 Entrar na Conta (JWT)</h2>
+          <p>Autentique-se via <code>POST /auth/login</code> para receber seu token JWT e registrar palpites.</p>
+          <form id="form-login" class="formulario">
+            <div class="campo-form">
+              <label for="login-email">E-mail</label>
+              <input type="email" id="login-email" class="input-padrao" placeholder="ex: joao@ufrn.br ou admin@arenapro.com" required />
+            </div>
+            <div class="campo-form">
+              <label for="login-senha">Senha</label>
+              <input type="password" id="login-senha" class="input-padrao" placeholder="Sua senha (mín. 6 caracteres)" required />
+            </div>
+            <button type="submit" class="btn btn-primario btn-bloco">Entrar com JWT</button>
+          </form>
+        </div>
+
+        <!-- Card de Cadastro -->
+        <div class="painel-card">
+          <h2>📝 Criar Nova Conta</h2>
+          <p>Cadastre-se via <code>POST /usuarios</code>. Dica: e-mails iniciados com <code>admin@</code> ganham perfil <strong>ADMIN</strong> automaticamente.</p>
+          <form id="form-cadastro" class="formulario">
+            <div class="campo-form">
+              <label for="cad-nome">Nome completo</label>
+              <input type="text" id="cad-nome" class="input-padrao" placeholder="João Marcelo" required />
+            </div>
+            <div class="campo-form">
+              <label for="cad-email">E-mail</label>
+              <input type="email" id="cad-email" class="input-padrao" placeholder="joao@ufrn.br" required />
+            </div>
+            <div class="campo-form">
+              <label for="cad-senha">Senha (mínimo 6 caracteres)</label>
+              <input type="password" id="cad-senha" class="input-padrao" minlength="6" placeholder="******" required />
+            </div>
+            <button type="submit" class="btn btn-info btn-bloco">Cadastrar e Entrar</button>
+          </form>
+        </div>
       </div>
     </section>
 
-
+    <!-- ABA 3: MEUS PALPITES (Reservado para a dupla) -->
     <section id="aba-palpites" class="aba-conteudo">
       <div class="painel-card">
         <h2>🎯 Meus Palpites</h2>
@@ -62,7 +154,7 @@
       </div>
     </section>
 
-
+    <!-- ABA 4: RANKING (Reservado para a dupla) -->
     <section id="aba-ranking" class="aba-conteudo">
       <div class="painel-card">
         <h2>🏆 Ranking de Torcedores</h2>
@@ -70,11 +162,11 @@
       </div>
     </section>
 
-
+    <!-- ABA 5: PAINEL ADMIN (Reservado para a dupla) -->
     <section id="aba-admin" class="aba-conteudo">
       <div class="painel-card">
         <h2>⚙️ Painel Administrativo (Times e Partidas)</h2>
-        <p>Espaço reservado para o cadastro de Times (<code>POST /times</code>) e criação de Partidas (<code>POST /partidas</code>).</p>
+        <p>Espaço reservado para o cadastro manual de Times (<code>POST /times</code>) e criação de Partidas (<code>POST /partidas</code>).</p>
       </div>
     </section>
 
