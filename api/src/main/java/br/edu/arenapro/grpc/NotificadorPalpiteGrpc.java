@@ -32,7 +32,7 @@ public class NotificadorPalpiteGrpc implements NotificadorPalpite {
     @GrpcClient("notificacao")
     NotificacaoServiceBlockingStub stub;
 
-    private Duration prazo = Duration.ofSeconds(3);
+    private Duration prazo = Duration.ofSeconds(8);
 
     public NotificadorPalpiteGrpc() {
     }

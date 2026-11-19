@@ -44,7 +44,7 @@ func NovoBuscadorTheSportsDB(urlCustomizada string) *BuscadorTheSportsDB {
 	return &BuscadorTheSportsDB{
 		urlBase: base,
 		clienteHTTP: &http.Client{
-			Timeout: 5 * time.Second,
+			Timeout: 7 * time.Second,
 		},
 	}
 }
@@ -55,7 +55,9 @@ func (b *BuscadorTheSportsDB) BuscarResultado(
 	timeCasa string,
 	timeFora string,
 ) (*dominio.ResultadoPartidaExterno, error) {
-	termo := fmt.Sprintf("%s_vs_%s", strings.TrimSpace(timeCasa), strings.TrimSpace(timeFora))
+	casaNormalizada := strings.ReplaceAll(strings.TrimSpace(timeCasa), " ", "_")
+	foraNormalizado := strings.ReplaceAll(strings.TrimSpace(timeFora), " ", "_")
+	termo := fmt.Sprintf("%s_vs_%s", casaNormalizada, foraNormalizado)
 	urlCompleta := fmt.Sprintf("%s?e=%s", b.urlBase, url.QueryEscape(termo))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlCompleta, nil)
