@@ -115,6 +115,9 @@ public class PalpiteResource {
         if (partida == null) {
             throw new RegraNegocioException("A partida (id " + corpo.partidaId() + ") não existe.");
         }
+        if (partida.getStatus() == br.edu.arenapro.domain.StatusPartida.FINALIZADA) {
+            throw new RegraNegocioException("Não é permitido registrar palpites em uma partida já finalizada.");
+        }
         Palpite palpite = new Palpite();
         palpite.setUsuario(usuario);
         palpite.setPartida(partida);

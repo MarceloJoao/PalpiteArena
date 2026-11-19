@@ -116,6 +116,12 @@ function selecionarAba(idAba) {
   document.querySelectorAll('.aba-btn').forEach((botao) => {
     botao.classList.toggle('ativa', botao.dataset.aba === idAba);
   });
+
+  if (idAba === 'palpites') {
+    carregarMeusPalpites();
+  } else if (idAba === 'partidas' && apiOnline) {
+    carregarPartidasArena();
+  }
 }
 
 /* ==========================================================================
@@ -475,6 +481,19 @@ function montarDataHoraIso(dateEvent, strTime) {
   return `${dataLimpa}T${horaFormatada}`;
 }
 
+function eventoExternoJaFinalizado(ev) {
+  const temPlacar =
+    ev.intHomeScore !== null &&
+    ev.intHomeScore !== undefined &&
+    String(ev.intHomeScore).trim() !== '' &&
+    ev.intAwayScore !== null &&
+    ev.intAwayScore !== undefined &&
+    String(ev.intAwayScore).trim() !== '';
+
+  const emAndamento = ev.strStatus === '1H' || ev.strStatus === '2H' || ev.strStatus === 'HT';
+  return ev.strStatus === 'FT' || (temPlacar && !emAndamento);
+}
+
 async function importarEventoExternoParaArena(ev, cacheContexto = null) {
   const timesAtuais = cacheContexto?.times || (await requisicaoApi('/times?pagina=0&tamanho=100'));
   const partidasAtuais = cacheContexto?.partidas || (await requisicaoApi('/partidas?pagina=0&tamanho=100'));
@@ -487,15 +506,35 @@ async function importarEventoExternoParaArena(ev, cacheContexto = null) {
   const timeCasa = await garantirTimeNoBanco(ev.strHomeTeam, ev.strHomeTeamBadge, mapaTimes);
   const timeFora = await garantirTimeNoBanco(ev.strAwayTeam, ev.strAwayTeamBadge, mapaTimes);
 
+  const { isoLocal } = converterUtcTheSportsDBParaBrasilia(ev);
+  const jaFinalizada = eventoExternoJaFinalizado(ev);
+  const placarReal = jaFinalizada
+    ? `${String(ev.intHomeScore).trim()}x${String(ev.intAwayScore).trim()}`
+    : null;
+  const statusReal = jaFinalizada ? 'FINALIZADA' : 'AGENDADA';
+
   // Verifica se já existe partida entre os mesmos times
-  const jaExiste = (partidasAtuais || []).some(
+  const partidaExistente = (partidasAtuais || []).find(
     (p) => p.timeCasa?.id === timeCasa.id && p.timeFora?.id === timeFora.id
   );
-  if (jaExiste) {
+  if (partidaExistente) {
+    // Se a partida estava AGENDADA no banco mas já terminou na API externa, atualiza para FINALIZADA com o placar real
+    if (jaFinalizada && partidaExistente.status !== 'FINALIZADA') {
+      const atualizada = await requisicaoApi(`/partidas/${partidaExistente.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          timeCasaId: timeCasa.id,
+          timeForaId: timeFora.id,
+          data: isoLocal,
+          placar: placarReal,
+          status: 'FINALIZADA',
+        }),
+      });
+      Object.assign(partidaExistente, atualizada);
+      return atualizada;
+    }
     return null;
   }
-
-  const { isoLocal } = converterUtcTheSportsDBParaBrasilia(ev);
 
   const novaPartida = await requisicaoApi('/partidas', {
     method: 'POST',
@@ -503,7 +542,8 @@ async function importarEventoExternoParaArena(ev, cacheContexto = null) {
       timeCasaId: timeCasa.id,
       timeForaId: timeFora.id,
       data: isoLocal,
-      status: 'AGENDADA',
+      ...(placarReal ? { placar: placarReal } : {}),
+      status: statusReal,
     }),
   });
 
@@ -648,7 +688,7 @@ function renderizarPartidasArena(partidas) {
         ? `<span class="badge badge-online">✅ FINALIZADA</span>`
         : `<span class="badge badge-aviso">⏳ AGENDADA</span>`;
 
-      const blocoPalpite = !finalizada
+      const rodapePartida = !finalizada
         ? `
           <form class="form-palpite-rapido" data-partida-id="${p.id}">
             <div class="placar-inputs">
@@ -658,8 +698,20 @@ function renderizarPartidasArena(partidas) {
             </div>
             <button type="submit" class="btn btn-primario btn-pequeno">🎯 Palpitar</button>
           </form>
+          <button
+            type="button"
+            class="btn btn-grpc btn-apurar-partida"
+            data-partida-id="${p.id}"
+            data-descricao="${escaparHtml(nomeCasa)} x ${escaparHtml(nomeFora)}"
+          >
+            ⚡ Apurar Resultado na API Externa (Go + gRPC)
+          </button>
         `
-        : '';
+        : `
+          <div class="aviso-partida-encerrada">
+            🔒 Partida encerrada — palpites fechados (Placar Oficial: <strong>${escaparHtml(placarExibicao)}</strong>)
+          </div>
+        `;
 
       return `
         <article class="card-partida">
@@ -687,15 +739,7 @@ function renderizarPartidasArena(partidas) {
           </div>
 
           <div class="card-partida-rodape">
-            ${blocoPalpite}
-            <button
-              type="button"
-              class="btn btn-grpc btn-apurar-partida"
-              data-partida-id="${p.id}"
-              data-descricao="${escaparHtml(nomeCasa)} x ${escaparHtml(nomeFora)}"
-            >
-              ⚡ Apurar Resultado na API Externa (Go + gRPC)
-            </button>
+            ${rodapePartida}
           </div>
         </article>
       `;
@@ -729,6 +773,7 @@ function renderizarPartidasArena(partidas) {
         });
         mostrarToast(`Palpite ${placarprevisto} registrado com sucesso na Partida #${partidaId}!`);
         form.reset();
+        carregarMeusPalpites();
       } catch (erro) {
         mostrarToast(erro.message, 'erro');
       }
@@ -753,10 +798,255 @@ function renderizarPartidasArena(partidas) {
           `Resultado apurado para ${descricao}: ${partidaApurada.placar}! Palpites pontuados e notificações enviadas.`
         );
         await carregarPartidasArena();
+        await carregarMeusPalpites();
       } catch (erro) {
         mostrarToast(erro.message, 'erro');
         botao.disabled = false;
         botao.textContent = textoOriginal;
+      }
+    });
+  });
+}
+
+/* ==========================================================================
+   5.5. ABA 3: MEUS PALPITES (GET /palpites, PUT /palpites/{id}, DELETE /palpites/{id})
+   ========================================================================== */
+
+function atualizarResumoPalpites(palpites) {
+  const lista = Array.isArray(palpites) ? palpites : [];
+  const totalPalpites = lista.length;
+  let totalPontos = 0;
+  let cravadas = 0;
+  let pendentes = 0;
+
+  lista.forEach((palpite) => {
+    const pts = Number(palpite.pontosObtidos || 0);
+    totalPontos += pts;
+    if (pts === 3) cravadas++;
+    if (palpite.partida?.status !== 'FINALIZADA') pendentes++;
+  });
+
+  const elTotal = document.getElementById('stat-total-palpites');
+  const elPontos = document.getElementById('stat-total-pontos');
+  const elCravadas = document.getElementById('stat-cravadas');
+  const elPendentes = document.getElementById('stat-pendentes');
+
+  if (elTotal) elTotal.textContent = String(totalPalpites);
+  if (elPontos) elPontos.textContent = `${totalPontos} pts`;
+  if (elCravadas) elCravadas.textContent = String(cravadas);
+  if (elPendentes) elPendentes.textContent = String(pendentes);
+}
+
+async function carregarMeusPalpites() {
+  const container = document.getElementById('lista-meus-palpites');
+  if (!container) return [];
+
+  const escopo = document.getElementById('filtro-escopo-palpites')?.value || 'meus';
+  const sessao = obterSessao();
+
+  if (escopo === 'meus' && (!sessao || !sessao.usuarioId)) {
+    atualizarResumoPalpites([]);
+    container.innerHTML = `
+      <div class="texto-vazio">
+        <p style="margin-bottom: 12px;">🔐 Você ainda não está autenticado para filtrar <strong>Meus Palpites</strong>.</p>
+        <button type="button" id="btn-ir-login-palpites" class="btn btn-primario">
+          Entrar / Criar Conta Agora
+        </button>
+      </div>
+    `;
+    document.getElementById('btn-ir-login-palpites')?.addEventListener('click', () => {
+      selecionarAba('auth');
+    });
+    return [];
+  }
+
+  const queryUsuario =
+    escopo === 'meus' && sessao?.usuarioId
+      ? `&usuarioId=${encodeURIComponent(sessao.usuarioId)}`
+      : '';
+
+  try {
+    const palpites = await requisicaoApi(`/palpites?pagina=0&tamanho=100${queryUsuario}`);
+    const lista = Array.isArray(palpites) ? palpites : [];
+    atualizarResumoPalpites(lista);
+    renderizarMeusPalpites(lista);
+    return lista;
+  } catch (erro) {
+    atualizarResumoPalpites([]);
+    container.innerHTML = `
+      <p class="texto-vazio">
+        ⚠️ Não foi possível carregar os palpites (${escaparHtml(erro.message)}). Verifique se a API Quarkus está rodando na porta 8080.
+      </p>
+    `;
+    return [];
+  }
+}
+
+function renderizarMeusPalpites(palpites) {
+  const container = document.getElementById('lista-meus-palpites');
+  if (!container) return;
+
+  if (!palpites || palpites.length === 0) {
+    container.innerHTML = `
+      <p class="texto-vazio">
+        🎯 Nenhum palpite encontrado. Vá na aba <strong>"🏟️ Partidas &amp; Apuração"</strong> e registre seu primeiro palpite!
+      </p>
+    `;
+    return;
+  }
+
+  container.innerHTML = palpites
+    .map((palpite) => {
+      const partida = palpite.partida || {};
+      const nomeCasa = partida.timeCasa?.nome || 'Time Casa';
+      const nomeFora = partida.timeFora?.nome || 'Time Fora';
+      const escudoCasa = partida.timeCasa?.escudoUrl || ESCUDO_PADRAO;
+      const escudoFora = partida.timeFora?.escudoUrl || ESCUDO_PADRAO;
+      const finalizada = partida.status === 'FINALIZADA';
+      const { data: dataBr, hora: horaBr } = extrairDataEHoraArena(partida.data);
+
+      const placarPrevisto = palpite.placarprevisto || '0x0';
+      const [golsCasaPrev = '0', golsForaPrev = '0'] = placarPrevisto.split('x');
+      const placarOficial = partida.placar ? partida.placar.replace('x', ' x ') : 'Aguardando';
+      const pts = Number(palpite.pontosObtidos || 0);
+      const nomeTorcedor = palpite.usuario?.nome || 'Torcedor';
+
+      let badgePontos = `<span class="badge badge-aviso">⏳ Aguardando Jogo</span>`;
+      if (finalizada) {
+        if (pts === 3) {
+          badgePontos = `<span class="badge badge-online">🎯 +3 pts (Placar Exato!)</span>`;
+        } else if (pts === 1) {
+          badgePontos = `<span class="badge badge-info">✅ +1 pt (Vencedor/Empate)</span>`;
+        } else {
+          badgePontos = `<span class="badge badge-offline">❌ 0 pts</span>`;
+        }
+      }
+
+      return `
+        <article class="card-partida">
+          <div class="card-partida-topo">
+            <span class="liga-tag" title="Torcedor: ${escaparHtml(nomeTorcedor)}">
+              Palpite #${palpite.id} • 👤 ${escaparHtml(nomeTorcedor)}
+            </span>
+            ${badgePontos}
+          </div>
+
+          <div class="confronto">
+            <div class="time-bloco">
+              <img src="${escaparHtml(escudoCasa)}" alt="${escaparHtml(nomeCasa)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+              <span class="nome-time">${escaparHtml(nomeCasa)}</span>
+            </div>
+
+            <div class="placar-central">
+              <span class="placar-numero">${escaparHtml(placarPrevisto.replace('x', ' x '))}</span>
+              <span class="versus-label">📅 ${escaparHtml(dataBr)}</span>
+              <span class="horario-partida">🕒 ${escaparHtml(horaBr)}</span>
+            </div>
+
+            <div class="time-bloco">
+              <img src="${escaparHtml(escudoFora)}" alt="${escaparHtml(nomeFora)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+              <span class="nome-time">${escaparHtml(nomeFora)}</span>
+            </div>
+          </div>
+
+          <div class="comparativo-placares">
+            <div class="caixa-placar-info">
+              <span>🎯 Seu Palpite</span>
+              <strong class="destaque-azul">${escaparHtml(placarPrevisto.replace('x', ' x '))}</strong>
+            </div>
+            <div class="caixa-placar-info">
+              <span>🏟️ Placar Oficial</span>
+              <strong class="${finalizada ? 'destaque-verde' : ''}">${escaparHtml(placarOficial)}</strong>
+            </div>
+          </div>
+
+          <div class="card-partida-rodape">
+            ${
+              !finalizada
+                ? `
+            <form class="acoes-palpite-card form-editar-palpite" data-palpite-id="${palpite.id}">
+              <div class="placar-inputs">
+                <input
+                  type="number"
+                  min="0"
+                  max="99"
+                  required
+                  value="${escaparHtml(golsCasaPrev)}"
+                  class="input-padrao input-gols"
+                  name="golsCasa"
+                />
+                <span class="versus-label">x</span>
+                <input
+                  type="number"
+                  min="0"
+                  max="99"
+                  required
+                  value="${escaparHtml(golsForaPrev)}"
+                  class="input-padrao input-gols"
+                  name="golsFora"
+                />
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <button type="submit" class="btn btn-info btn-pequeno" title="Atualizar placar previsto (PUT /palpites/${palpite.id})">
+                  💾 Salvar
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-perigo btn-pequeno btn-excluir-palpite"
+                  data-palpite-id="${palpite.id}"
+                  title="Remover palpite (DELETE /palpites/${palpite.id})"
+                >
+                  🗑️ Excluir
+                </button>
+              </div>
+            </form>`
+                : `
+            <div class="aviso-partida-encerrada">
+              🔒 Partida finalizada — palpite consolidado (${pts} ${pts === 1 ? 'ponto' : 'pontos'})
+            </div>`
+            }
+          </div>
+        </article>
+      `;
+    })
+    .join('');
+
+  // Eventos de atualização de palpite (PUT /palpites/{id})
+  container.querySelectorAll('.form-editar-palpite').forEach((form) => {
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const palpiteId = Number(form.dataset.palpiteId);
+      const golsCasa = form.elements.golsCasa.value.trim();
+      const golsFora = form.elements.golsFora.value.trim();
+      const placarprevisto = `${golsCasa}x${golsFora}`;
+
+      try {
+        await requisicaoApi(`/palpites/${palpiteId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ placarprevisto }),
+        });
+        mostrarToast(`Palpite #${palpiteId} atualizado para ${placarprevisto}!`);
+        await carregarMeusPalpites();
+      } catch (erro) {
+        mostrarToast(erro.message, 'erro');
+      }
+    });
+  });
+
+  // Eventos de exclusão de palpite (DELETE /palpites/{id})
+  container.querySelectorAll('.btn-excluir-palpite').forEach((botao) => {
+    botao.addEventListener('click', async () => {
+      const palpiteId = Number(botao.dataset.palpiteId);
+      botao.disabled = true;
+      try {
+        await requisicaoApi(`/palpites/${palpiteId}`, {
+          method: 'DELETE',
+        });
+        mostrarToast(`Palpite #${palpiteId} removido com sucesso!`);
+        await carregarMeusPalpites();
+      } catch (erro) {
+        mostrarToast(erro.message, 'erro');
+        botao.disabled = false;
       }
     });
   });
@@ -802,6 +1092,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Botões do Mural da Arena
   document.getElementById('btn-recarregar-arena')?.addEventListener('click', carregarPartidasArena);
   document.getElementById('filtro-status-arena')?.addEventListener('change', carregarPartidasArena);
+
+  // Botões da Aba 3 — Meus Palpites
+  document.getElementById('btn-recarregar-palpites')?.addEventListener('click', carregarMeusPalpites);
+  document.getElementById('filtro-escopo-palpites')?.addEventListener('change', carregarMeusPalpites);
 
   // Inicializa cabeçalho e datas de Hoje e Amanhã
   atualizarCabecalhoUsuario();

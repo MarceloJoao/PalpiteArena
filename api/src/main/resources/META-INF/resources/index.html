@@ -146,11 +146,49 @@
       </div>
     </section>
 
-    <!-- ABA 3: MEUS PALPITES (Reservado para a dupla) -->
+    <!-- ABA 3: MEUS PALPITES (GET /palpites, PUT /palpites/{id}, DELETE /palpites/{id}) -->
     <section id="aba-palpites" class="aba-conteudo">
-      <div class="painel-card">
-        <h2>🎯 Meus Palpites</h2>
-        <p>Espaço reservado para o módulo de histórico e edição de palpites do usuário (<code>GET /palpites?usuarioId=...</code>).</p>
+      <div class="painel-card painel-destaque">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>🎯 Meus Palpites &amp; Histórico de Pontuação</h2>
+            <p>Acompanhe seus palpites registrados (<code>GET /palpites</code>), altere o placar previsto (<code>PUT /palpites/{id}</code>) ou remova um palpite (<code>DELETE /palpites/{id}</code>).</p>
+          </div>
+          <div class="acoes-secao">
+            <select id="filtro-escopo-palpites" class="input-padrao">
+              <option value="meus">Apenas Meus Palpites</option>
+              <option value="todos">Todos os Palpites da Arena</option>
+            </select>
+            <button id="btn-recarregar-palpites" class="btn btn-secundario" type="button">
+              🔄 Atualizar Palpites
+            </button>
+          </div>
+        </div>
+
+        <!-- Resumo de Desempenho do Torcedor -->
+        <div id="resumo-palpites" class="grade-estatisticas">
+          <div class="card-estatistica">
+            <span class="estatistica-rotulo">Total de Palpites</span>
+            <strong id="stat-total-palpites" class="estatistica-valor">0</strong>
+          </div>
+          <div class="card-estatistica">
+            <span class="estatistica-rotulo">Pontos Somados</span>
+            <strong id="stat-total-pontos" class="estatistica-valor destaque-verde">0 pts</strong>
+          </div>
+          <div class="card-estatistica">
+            <span class="estatistica-rotulo">Placares Exatos (3 pts)</span>
+            <strong id="stat-cravadas" class="estatistica-valor destaque-azul">0</strong>
+          </div>
+          <div class="card-estatistica">
+            <span class="estatistica-rotulo">Aguardando Resultado</span>
+            <strong id="stat-pendentes" class="estatistica-valor">0</strong>
+          </div>
+        </div>
+
+        <!-- Lista de Cards de Palpites -->
+        <div id="lista-meus-palpites" class="grade-partidas">
+          <p class="texto-vazio">Faça login e registre um palpite no Mural de Partidas para acompanhar aqui.</p>
+        </div>
       </div>
     </section>
 
