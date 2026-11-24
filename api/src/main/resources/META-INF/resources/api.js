@@ -119,6 +119,10 @@ function selecionarAba(idAba) {
 
   if (idAba === 'palpites') {
     carregarMeusPalpites();
+  } else if (idAba === 'ranking') {
+    carregarRanking();
+  } else if (idAba === 'admin') {
+    carregarPainelAdmin();
   } else if (idAba === 'partidas' && apiOnline) {
     carregarPartidasArena();
   }
@@ -149,6 +153,17 @@ async function verificarStatusApi() {
     indicador.className = 'badge badge-offline';
     apiOnline = false;
     return false;
+  }
+}
+
+async function validarSessaoExistenteNoBanco() {
+  const sessao = obterSessao();
+  if (!sessao || !sessao.usuarioId) return;
+  try {
+    await requisicaoApi(`/usuarios/${sessao.usuarioId}`);
+  } catch {
+    // Caso o banco tenha sido recriado e o usuario antigo nao exista mais, limpa a sessao fantasma
+    salvarSessao(null);
   }
 }
 
@@ -1052,6 +1067,350 @@ function renderizarMeusPalpites(palpites) {
   });
 }
 
+/* ==========================================================================
+   5.6. ABA 4: RANKING DE TORCEDORES (GET /usuarios/ranking)
+   ========================================================================== */
+
+async function carregarRanking() {
+  const tbody = document.getElementById('corpo-tabela-ranking');
+  if (!tbody) return [];
+
+  try {
+    const usuarios = await requisicaoApi('/usuarios/ranking?pagina=0&tamanho=100');
+    const lista = Array.isArray(usuarios) ? usuarios : [];
+
+    if (lista.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="4" class="texto-vazio">
+            Nenhum torcedor cadastrado ainda. Crie uma conta na aba <strong>"🔐 Entrar / Cadastrar"</strong>!
+          </td>
+        </tr>
+      `;
+      return [];
+    }
+
+    const sessao = obterSessao();
+    const medalhas = ['🥇 1º', '🥈 2º', '🥉 3º'];
+
+    tbody.innerHTML = lista
+      .map((u, idx) => {
+        const posicao = medalhas[idx] || `${idx + 1}º`;
+        const ehUsuarioAtual = sessao && Number(sessao.usuarioId) === Number(u.id);
+        const classeLinha = ehUsuarioAtual ? 'linha-usuario-atual' : '';
+        const tagVoce = ehUsuarioAtual ? ' <span class="badge badge-online">Você</span>' : '';
+        const pts = Number(u.pontuacaoTotal || 0);
+
+        return `
+          <tr class="${classeLinha}">
+            <td><strong>${posicao}</strong></td>
+            <td><strong>${escaparHtml(u.nome)}</strong>${tagVoce}</td>
+            <td>${escaparHtml(u.email)}</td>
+            <td class="col-direita">
+              <span class="pontos-pill">${pts} ${pts === 1 ? 'ponto' : 'pontos'}</span>
+            </td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    return lista;
+  } catch (erro) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="4" class="texto-vazio">
+          ⚠️ Erro ao carregar ranking (${escaparHtml(erro.message)}). Verifique se a API Quarkus está rodando.
+        </td>
+      </tr>
+    `;
+    return [];
+  }
+}
+
+/* ==========================================================================
+   5.7. ABA 5: PAINEL ADMINISTRATIVO (Times e Partidas)
+   ========================================================================== */
+
+function atualizarAvisoPermissaoAdmin() {
+  const banner = document.getElementById('aviso-permissao-admin');
+  if (!banner) return;
+
+  const sessao = obterSessao();
+  if (sessao && sessao.papel === 'ADMIN') {
+    banner.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <h2>✅ Modo Administrador Ativo (${escaparHtml(sessao.nome)})</h2>
+          <p>Você está autenticado com perfil <strong>ADMIN</strong> e possui acesso completo ao gerenciamento manual de clubes e partidas.</p>
+        </div>
+        <span class="badge badge-info">PERFIL ADMIN</span>
+      </div>
+    `;
+  } else {
+    banner.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <h2>ℹ️ Dica de Perfil Administrador</h2>
+          <p>Para testar o fluxo com perfil <strong>ADMIN</strong>, entre com um e-mail iniciado por <code>admin@</code> (ex.: <code>admin@arenapro.com</code>). Os endpoints abaixo também estão liberados para seus testes locais.</p>
+        </div>
+        <button type="button" id="btn-ir-auth-admin" class="btn btn-secundario btn-pequeno">
+          Ir para Login / Cadastro
+        </button>
+      </div>
+    `;
+    document.getElementById('btn-ir-auth-admin')?.addEventListener('click', () => selecionarAba('auth'));
+  }
+}
+
+async function carregarPainelAdmin() {
+  atualizarAvisoPermissaoAdmin();
+
+  const selectCasa = document.getElementById('partida-casa');
+  const selectFora = document.getElementById('partida-fora');
+  const containerTimes = document.getElementById('lista-times-admin');
+  const containerPartidas = document.getElementById('lista-partidas-admin');
+
+  // Preenche data/hora padrão no formulário de nova partida se estiver vazio
+  const inputData = document.getElementById('partida-data');
+  if (inputData && !inputData.value) {
+    inputData.value = `${obterDataLocalFormatada(1)}T16:00`;
+  }
+
+  try {
+    const [times, partidas] = await Promise.all([
+      requisicaoApi('/times?pagina=0&tamanho=100'),
+      requisicaoApi('/partidas?pagina=0&tamanho=100'),
+    ]);
+
+    const listaTimes = Array.isArray(times) ? times : [];
+    const listaPartidas = Array.isArray(partidas) ? partidas : [];
+
+    // Popula selects de Time da Casa e Time de Fora
+    const opcoesHtml =
+      `<option value="">Selecione um time...</option>` +
+      listaTimes
+        .map((t) => `<option value="${t.id}">${escaparHtml(t.nome)} (#${t.id})</option>`)
+        .join('');
+
+    if (selectCasa) selectCasa.innerHTML = opcoesHtml;
+    if (selectFora) selectFora.innerHTML = opcoesHtml;
+
+    // Renderiza lista de Times com botão de excluir
+    if (containerTimes) {
+      if (listaTimes.length === 0) {
+        containerTimes.innerHTML = `<p class="texto-vazio">Nenhum time cadastrado no banco.</p>`;
+      } else {
+        containerTimes.innerHTML = listaTimes
+          .map((t) => {
+            const escudo = t.escudoUrl || ESCUDO_PADRAO;
+            return `
+              <div class="card-time-admin">
+                <div class="info-time-admin">
+                  <img src="${escaparHtml(escudo)}" alt="${escaparHtml(t.nome)}" class="escudo-time" style="width:32px;height:32px;" onerror="this.src='${ESCUDO_PADRAO}'" />
+                  <span title="${escaparHtml(t.nome)}">${escaparHtml(t.nome)}</span>
+                </div>
+                <button
+                  type="button"
+                  class="btn btn-perigo btn-pequeno btn-remover-time"
+                  data-time-id="${t.id}"
+                  data-time-nome="${escaparHtml(t.nome)}"
+                  title="Remover Time (DELETE /times/${t.id})"
+                >
+                  🗑️
+                </button>
+              </div>
+            `;
+          })
+          .join('');
+
+        containerTimes.querySelectorAll('.btn-remover-time').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const id = Number(btn.dataset.timeId);
+            const nome = btn.dataset.timeNome;
+            btn.disabled = true;
+            try {
+              await requisicaoApi(`/times/${id}`, { method: 'DELETE' });
+              mostrarToast(`Time "${nome}" removido com sucesso!`);
+              await carregarPainelAdmin();
+            } catch (erro) {
+              mostrarToast(erro.message, 'erro');
+              btn.disabled = false;
+            }
+          });
+        });
+      }
+    }
+
+    // Renderiza lista de Partidas para encerramento manual ou exclusão
+    if (containerPartidas) {
+      if (listaPartidas.length === 0) {
+        containerPartidas.innerHTML = `<p class="texto-vazio">Nenhuma partida cadastrada no banco.</p>`;
+      } else {
+        containerPartidas.innerHTML = listaPartidas
+          .map((p) => {
+            const nomeCasa = p.timeCasa?.nome || 'Time Casa';
+            const nomeFora = p.timeFora?.nome || 'Time Fora';
+            const escudoCasa = p.timeCasa?.escudoUrl || ESCUDO_PADRAO;
+            const escudoFora = p.timeFora?.escudoUrl || ESCUDO_PADRAO;
+            const finalizada = p.status === 'FINALIZADA';
+            const [golsCasaAtual = '0', golsForaAtual = '0'] = (p.placar || '0x0').split('x');
+            const { data: dataBr, hora: horaBr } = extrairDataEHoraArena(p.data);
+
+            return `
+              <article class="card-partida">
+                <div class="card-partida-topo">
+                  <span class="liga-tag">Partida #${p.id} • 📅 ${escaparHtml(dataBr)} (${escaparHtml(horaBr)})</span>
+                  <span class="badge ${finalizada ? 'badge-online' : 'badge-aviso'}">${p.status}</span>
+                </div>
+
+                <div class="confronto">
+                  <div class="time-bloco">
+                    <img src="${escaparHtml(escudoCasa)}" alt="${escaparHtml(nomeCasa)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+                    <span class="nome-time">${escaparHtml(nomeCasa)}</span>
+                  </div>
+                  <div class="placar-central">
+                    <span class="placar-numero">${escaparHtml(p.placar ? p.placar.replace('x', ' x ') : 'VS')}</span>
+                    <span class="versus-label">${finalizada ? 'Finalizada' : 'Agendada'}</span>
+                  </div>
+                  <div class="time-bloco">
+                    <img src="${escaparHtml(escudoFora)}" alt="${escaparHtml(nomeFora)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+                    <span class="nome-time">${escaparHtml(nomeFora)}</span>
+                  </div>
+                </div>
+
+                <div class="card-partida-rodape">
+                  <form
+                    class="acoes-palpite-card form-finalizar-manual"
+                    data-partida-id="${p.id}"
+                    data-casa-id="${p.timeCasa?.id}"
+                    data-fora-id="${p.timeFora?.id}"
+                    data-iso="${escaparHtml(p.data)}"
+                  >
+                    <div class="placar-inputs">
+                      <input type="number" min="0" max="99" required value="${escaparHtml(golsCasaAtual)}" class="input-padrao input-gols" name="golsCasa" />
+                      <span class="versus-label">x</span>
+                      <input type="number" min="0" max="99" required value="${escaparHtml(golsForaAtual)}" class="input-padrao input-gols" name="golsFora" />
+                    </div>
+                    <div style="display: flex; gap: 6px;">
+                      <button type="submit" class="btn btn-primario btn-pequeno" title="Salvar placar oficial e finalizar partida (PUT /partidas/${p.id})">
+                        ✅ Finalizar
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-perigo btn-pequeno btn-remover-partida"
+                        data-partida-id="${p.id}"
+                        title="Excluir partida (DELETE /partidas/${p.id})"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </article>
+            `;
+          })
+          .join('');
+
+        // Eventos para finalizar partida manualmente (PUT /partidas/{id})
+        containerPartidas.querySelectorAll('.form-finalizar-manual').forEach((form) => {
+          form.addEventListener('submit', async (ev) => {
+            ev.preventDefault();
+            const id = Number(form.dataset.partidaId);
+            const timeCasaId = Number(form.dataset.casaId);
+            const timeForaId = Number(form.dataset.foraId);
+            const dataIso = form.dataset.iso;
+            const golsCasa = form.elements.golsCasa.value.trim();
+            const golsFora = form.elements.golsFora.value.trim();
+            const placar = `${golsCasa}x${golsFora}`;
+
+            try {
+              await requisicaoApi(`/partidas/${id}`, {
+                method: 'PUT',
+                body: JSON.stringify({
+                  timeCasaId,
+                  timeForaId,
+                  data: dataIso,
+                  placar,
+                  status: 'FINALIZADA',
+                }),
+              });
+              mostrarToast(`Partida #${id} finalizada com placar ${placar}! Pontos calculados e notificações enviadas.`);
+              await carregarPainelAdmin();
+              await carregarPartidasArena();
+            } catch (erro) {
+              mostrarToast(erro.message, 'erro');
+            }
+          });
+        });
+
+        // Eventos para remover partida (DELETE /partidas/{id})
+        containerPartidas.querySelectorAll('.btn-remover-partida').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const id = Number(btn.dataset.partidaId);
+            btn.disabled = true;
+            try {
+              await requisicaoApi(`/partidas/${id}`, { method: 'DELETE' });
+              mostrarToast(`Partida #${id} removida com sucesso!`);
+              await carregarPainelAdmin();
+              await carregarPartidasArena();
+            } catch (erro) {
+              mostrarToast(erro.message, 'erro');
+              btn.disabled = false;
+            }
+          });
+        });
+      }
+    }
+  } catch (erro) {
+    if (containerPartidas) {
+      containerPartidas.innerHTML = `<p class="texto-vazio">⚠️ API Quarkus offline (${escaparHtml(erro.message)}).</p>`;
+    }
+  }
+}
+
+async function criarTimeManual(evento) {
+  evento.preventDefault();
+  const nome = document.getElementById('time-nome').value.trim();
+  const escudoUrl = document.getElementById('time-escudo').value.trim() || null;
+
+  try {
+    const criado = await requisicaoApi('/times', {
+      method: 'POST',
+      body: JSON.stringify({ nome, escudoUrl }),
+    });
+    mostrarToast(`Time "${criado.nome}" cadastrado com sucesso!`);
+    document.getElementById('form-criar-time').reset();
+    await carregarPainelAdmin();
+  } catch (erro) {
+    mostrarToast(erro.message, 'erro');
+  }
+}
+
+async function criarPartidaManual(evento) {
+  evento.preventDefault();
+  const timeCasaId = Number(document.getElementById('partida-casa').value);
+  const timeForaId = Number(document.getElementById('partida-fora').value);
+  const dataBruta = document.getElementById('partida-data').value;
+  const data = dataBruta.length === 16 ? `${dataBruta}:00` : dataBruta;
+
+  try {
+    const criada = await requisicaoApi('/partidas', {
+      method: 'POST',
+      body: JSON.stringify({
+        timeCasaId,
+        timeForaId,
+        data,
+        status: 'AGENDADA',
+      }),
+    });
+    mostrarToast(`Partida #${criada.id} criada e agendada no Mural da Arena!`);
+    await carregarPainelAdmin();
+    await carregarPartidasArena();
+  } catch (erro) {
+    mostrarToast(erro.message, 'erro');
+  }
+}
+
 function escaparHtml(texto) {
   return String(texto ?? '')
     .replace(/&/g, '&amp;')
@@ -1097,6 +1456,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-recarregar-palpites')?.addEventListener('click', carregarMeusPalpites);
   document.getElementById('filtro-escopo-palpites')?.addEventListener('change', carregarMeusPalpites);
 
+  // Botões da Aba 4 — Ranking
+  document.getElementById('btn-recarregar-ranking')?.addEventListener('click', carregarRanking);
+
+  // Formulários e Botões da Aba 5 — Painel Admin
+  document.getElementById('form-criar-time')?.addEventListener('submit', criarTimeManual);
+  document.getElementById('form-criar-partida')?.addEventListener('submit', criarPartidaManual);
+  document.getElementById('btn-recarregar-admin')?.addEventListener('click', carregarPainelAdmin);
+
   // Inicializa cabeçalho e datas de Hoje e Amanhã
   atualizarCabecalhoUsuario();
   preencherDatasHojeEAmanha();
@@ -1107,6 +1474,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 2) Verifica se a API Quarkus está online e carrega o Mural do Banco
   const online = await verificarStatusApi();
   if (online) {
+    await validarSessaoExistenteNoBanco();
     const partidasNoBanco = await carregarPartidasArena();
     // Se o banco estiver vazio, sincroniza automaticamente as partidas de Hoje e Amanhã para o Mural!
     if (partidasNoBanco.length === 0 && externas.length > 0) {

@@ -192,19 +192,136 @@
       </div>
     </section>
 
-    <!-- ABA 4: RANKING (Reservado para a dupla) -->
+    <!-- ABA 4: RANKING DE TORCEDORES & REGRAS (GET /usuarios/ranking) -->
     <section id="aba-ranking" class="aba-conteudo">
+      <!-- Quadro de Regras do Bolão -->
       <div class="painel-card">
-        <h2>🏆 Ranking de Torcedores</h2>
-        <p>Espaço reservado para a tabela de classificação geral (<code>GET /usuarios/ranking</code>).</p>
+        <h2>📜 Regras Oficiais de Pontuação da PalpiteArena</h2>
+        <p>Os pontos são calculados automaticamente assim que uma partida é finalizada (via API externa TheSportsDB + Go/gRPC ou pelo Painel Admin):</p>
+        <div class="grade-regras">
+          <div class="card-regra regra-ouro">
+            <span class="regra-pontos">🎯 +3 Pontos</span>
+            <strong>Placar Exato (Cravada)</strong>
+            <p>Acertou exatamente o número de gols do time da casa e do visitante (ex.: palpitou <code>2x1</code> e o jogo terminou <code>2x1</code>).</p>
+          </div>
+          <div class="card-regra regra-prata">
+            <span class="regra-pontos">✅ +1 Ponto</span>
+            <strong>Vencedor ou Empate</strong>
+            <p>Acertou o time vencedor ou que houve empate, mas com placar diferente (ex.: palpitou <code>1x0</code> e terminou <code>3x1</code>, ou palpitou <code>0x0</code> e terminou <code>2x2</code>).</p>
+          </div>
+          <div class="card-regra regra-bronze">
+            <span class="regra-pontos">❌ 0 Pontos</span>
+            <strong>Resultado Incorreto</strong>
+            <p>O resultado final da partida (vitória do mandante, empate ou vitória do visitante) foi diferente do previsto.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tabela de Classificação Geral -->
+      <div class="painel-card painel-destaque">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>🏆 Classificação Geral de Torcedores</h2>
+            <p>Ranking oficial ordenado pela pontuação total acumulada (<code>GET /usuarios/ranking</code>).</p>
+          </div>
+          <div class="acoes-secao">
+            <button id="btn-recarregar-ranking" class="btn btn-secundario" type="button">
+              🔄 Atualizar Ranking
+            </button>
+          </div>
+        </div>
+
+        <div class="tabela-container">
+          <table class="tabela-ranking">
+            <thead>
+              <tr>
+                <th>Posição</th>
+                <th>Torcedor</th>
+                <th>E-mail</th>
+                <th class="col-direita">Pontuação Total</th>
+              </tr>
+            </thead>
+            <tbody id="corpo-tabela-ranking">
+              <tr>
+                <td colspan="4" class="texto-vazio">Carregando ranking de torcedores...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
 
-    <!-- ABA 5: PAINEL ADMIN (Reservado para a dupla) -->
+    <!-- ABA 5: PAINEL ADMINISTRATIVO (POST/DELETE /times, POST/PUT/DELETE /partidas) -->
     <section id="aba-admin" class="aba-conteudo">
+      <div id="aviso-permissao-admin" class="painel-card"></div>
+
+      <div class="grade-dupla">
+        <!-- Card 1: Cadastro de Time -->
+        <div class="painel-card">
+          <h2>🛡️ Cadastrar Novo Time</h2>
+          <p>Adicione um clube manualmente no banco (<code>POST /times</code>).</p>
+          <form id="form-criar-time" class="formulario">
+            <div class="campo-form">
+              <label for="time-nome">Nome do Clube</label>
+              <input type="text" id="time-nome" class="input-padrao" placeholder="ex: Flamengo" required />
+            </div>
+            <div class="campo-form">
+              <label for="time-escudo">URL do Escudo (opcional)</label>
+              <input type="url" id="time-escudo" class="input-padrao" placeholder="https://..." />
+            </div>
+            <button type="submit" class="btn btn-primario btn-bloco">➕ Cadastrar Time</button>
+          </form>
+        </div>
+
+        <!-- Card 2: Criação Manual de Partida -->
+        <div class="painel-card">
+          <h2>🏟️ Agendar Nova Partida</h2>
+          <p>Crie um confronto entre dois times cadastrados (<code>POST /partidas</code>).</p>
+          <form id="form-criar-partida" class="formulario">
+            <div class="campo-form">
+              <label for="partida-casa">Time da Casa (Mandante)</label>
+              <select id="partida-casa" class="input-padrao" required>
+                <option value="">Selecione o mandante...</option>
+              </select>
+            </div>
+            <div class="campo-form">
+              <label for="partida-fora">Time de Fora (Visitante)</label>
+              <select id="partida-fora" class="input-padrao" required>
+                <option value="">Selecione o visitante...</option>
+              </select>
+            </div>
+            <div class="campo-form">
+              <label for="partida-data">Data e Horário</label>
+              <input type="datetime-local" id="partida-data" class="input-padrao" required />
+            </div>
+            <button type="submit" class="btn btn-info btn-bloco">📅 Criar Partida Agendada</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Card 3: Gerenciamento e Encerramento Manual de Partidas -->
+      <div class="painel-card painel-destaque">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>⚖️ Gerenciar &amp; Finalizar Partidas Manualmente</h2>
+            <p>Defina o placar final manualmente (<code>PUT /partidas/{id}</code>) para apurar os pontos e disparar notificações via Go/gRPC, ou remova partidas (<code>DELETE /partidas/{id}</code>).</p>
+          </div>
+          <button id="btn-recarregar-admin" class="btn btn-secundario" type="button">
+            🔄 Atualizar Dados
+          </button>
+        </div>
+        <div id="lista-partidas-admin" class="grade-partidas">
+          <p class="texto-vazio">Carregando partidas para gerenciamento...</p>
+        </div>
+      </div>
+
+      <!-- Card 4: Lista de Times Cadastrados -->
       <div class="painel-card">
-        <h2>⚙️ Painel Administrativo (Times e Partidas)</h2>
-        <p>Espaço reservado para o cadastro manual de Times (<code>POST /times</code>) e criação de Partidas (<code>POST /partidas</code>).</p>
+        <h2>📋 Times Cadastrados no Banco (<code>GET /times</code>)</h2>
+        <p>Clubes disponíveis para partidas. Você pode remover clubes que ainda não estejam vinculados a nenhuma partida (<code>DELETE /times/{id}</code>).</p>
+        <div id="lista-times-admin" class="grade-times-admin">
+          <p class="texto-vazio">Carregando times...</p>
+        </div>
       </div>
     </section>
 

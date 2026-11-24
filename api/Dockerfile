@@ -8,7 +8,7 @@ COPY api/gradlew api/gradlew
 COPY api/gradle api/gradle
 COPY api/gradle.properties api/settings.gradle.kts api/build.gradle.kts api/
 WORKDIR /src/api
-RUN sed -i 's/\r$//' gradlew && chmod +x gradlew
+RUN sed -i 's/\r$//' gradlew && chmod +x gradlew && ./gradlew --version --no-daemon
 COPY api/src src
 RUN ./gradlew build -x test --no-daemon
 
