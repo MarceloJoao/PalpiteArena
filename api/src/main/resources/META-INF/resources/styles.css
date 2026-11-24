@@ -415,6 +415,136 @@ body {
   padding: 8px 10px;
 }
 
+/* Regras de Pontuação e Tabela de Ranking (Aba 4) */
+.grade-regras {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.card-regra {
+  background: var(--bg-card-interno);
+  border: 1px solid var(--borda-clara);
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.regra-ouro {
+  border-left: 4px solid var(--verde-arena);
+}
+
+.regra-prata {
+  border-left: 4px solid #38bdf8;
+}
+
+.regra-bronze {
+  border-left: 4px solid var(--vermelho-erro);
+}
+
+.regra-pontos {
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--verde-arena);
+}
+
+.regra-prata .regra-pontos {
+  color: #38bdf8;
+}
+
+.regra-bronze .regra-pontos {
+  color: #f87171;
+}
+
+.tabela-container {
+  overflow-x: auto;
+  border: 1px solid var(--borda-clara);
+  border-radius: 10px;
+}
+
+.tabela-ranking {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-card-interno);
+  font-size: 0.92rem;
+}
+
+.tabela-ranking th,
+.tabela-ranking td {
+  padding: 13px 16px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.tabela-ranking th {
+  background: rgba(15, 23, 42, 0.8);
+  color: var(--texto-secundario);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tabela-ranking tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.linha-usuario-atual {
+  background: rgba(16, 185, 129, 0.12) !important;
+}
+
+.col-direita {
+  text-align: right !important;
+}
+
+.pontos-pill {
+  display: inline-block;
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  font-weight: 800;
+  padding: 3px 12px;
+  border-radius: 999px;
+}
+
+/* Painel Admin — Lista de Times (Aba 5) */
+.grade-times-admin {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.card-time-admin {
+  background: var(--bg-card-interno);
+  border: 1px solid var(--borda-clara);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.info-time-admin {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.info-time-admin span {
+  font-weight: 700;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Grade de Cards de Partidas */
 .grade-partidas {
   display: grid;
