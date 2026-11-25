@@ -12,6 +12,10 @@ public interface NotificadorPalpite {
 
     boolean notificarResultado(Palpite palpite);
 
+    default boolean notificarConviteDesafio(DesafioX1 desafio) {
+        return false;
+    }
+
     default Optional<String> consultarPlacarExterno(Partida partida) {
         return Optional.empty();
     }

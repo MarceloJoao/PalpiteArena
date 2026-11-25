@@ -1,5 +1,6 @@
 package br.edu.arenapro.grpc;
 
+import br.edu.arenapro.domain.DesafioX1;
 import br.edu.arenapro.domain.NotificadorPalpite;
 import br.edu.arenapro.domain.Palpite;
 import br.edu.arenapro.domain.Partida;
@@ -69,6 +70,37 @@ public class NotificadorPalpiteGrpc implements NotificadorPalpite {
         } catch (StatusRuntimeException e) {
             LOG.warnf("notificação do palpite %s não enviada: %s",
                     palpite.getId(), e.getStatus().getCode());
+            return false;
+        }
+    }
+
+    @Override
+    public boolean notificarConviteDesafio(DesafioX1 desafio) {
+        if (desafio == null || desafio.getDesafiado() == null || desafio.getDesafiante() == null) {
+            return false;
+        }
+        String destinatario = desafio.getDesafiado().getEmail() != null ? desafio.getDesafiado().getEmail() : "";
+        String nomeDesafiante = desafio.getDesafiante().getNome() != null ? desafio.getDesafiante().getNome() : "Um usuário";
+        String descricaoPartida = desafio.getPartida() != null ? desafio.getPartida().getDescricao() : "Partida";
+        String mensagemConvite = String.format(
+                "CONVITE DESAFIO X1: O usuário %s está lhe desafiando para uma aposta de R$ %s em %s, entre na plataforma e veja o convite.",
+                nomeDesafiante, desafio.getValor(), descricaoPartida);
+
+        try {
+            NotificarResultadoPalpiteResponse resposta = stub
+                    .withDeadlineAfter(prazo.toMillis(), TimeUnit.MILLISECONDS)
+                    .notificarResultadoPalpite(NotificarResultadoPalpiteRequest.newBuilder()
+                            .setDestinatario(destinatario)
+                            .setPontos(0)
+                            .setPartidaDescricao(mensagemConvite)
+                            .setPlacar(desafio.getOpcaoDesafiante() != null ? desafio.getOpcaoDesafiante().name() : "X1")
+                            .build());
+            LOG.infof("convite do desafio %s enviado por e-mail via Go/gRPC para %s (id=%s)",
+                    desafio.getId(), destinatario, resposta.getNotificacaoId());
+            return resposta.getSucesso();
+        } catch (StatusRuntimeException e) {
+            LOG.warnf("convite do desafio %s não enviado via gRPC: %s",
+                    desafio.getId(), e.getStatus().getCode());
             return false;
         }
     }

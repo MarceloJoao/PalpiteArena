@@ -1,11 +1,16 @@
 package br.edu.arenapro.resources;
 
+import br.edu.arenapro.domain.CarteiraCasa;
+import br.edu.arenapro.domain.DesafioX1;
 import br.edu.arenapro.domain.NotificadorPalpite;
+import br.edu.arenapro.domain.OpcaoDesafio;
 import br.edu.arenapro.domain.Palpite;
 import br.edu.arenapro.domain.Partida;
 import br.edu.arenapro.domain.StatusPartida;
 import br.edu.arenapro.domain.Time;
 import br.edu.arenapro.domain.Usuario;
+import br.edu.arenapro.repository.CarteiraCasaRepository;
+import br.edu.arenapro.repository.DesafioRepository;
 import br.edu.arenapro.repository.PalpiteRepository;
 import br.edu.arenapro.repository.PartidaRepository;
 import br.edu.arenapro.repository.TimeRepository;
@@ -49,6 +54,12 @@ public class PartidaResource {
 
     @Inject
     PalpiteRepository palpiteRepository;
+
+    @Inject
+    DesafioRepository desafioRepository;
+
+    @Inject
+    CarteiraCasaRepository carteiraCasaRepository;
 
     @Inject
     NotificadorPalpite notificador;
@@ -197,8 +208,27 @@ public class PartidaResource {
         }
     }
 
-    // Quando a partida e finalizada com placar, apura os pontos e dispara as notificacoes via gRPC
+    // Quando a partida tem gol ou e finalizada com placar, apura os pontos, liquida os desafios X1 e dispara as notificacoes via gRPC
     private void apurarENotificarPalpitesSeFinalizada(Partida partida) {
+        if (desafioRepository != null && partida.getId() != null) {
+            List<DesafioX1> desafios = desafioRepository.listarTodosPorPartida(partida.getId());
+            if (partida.getStatus() == StatusPartida.FINALIZADA
+                    && partida.getPlacar() != null
+                    && !partida.getPlacar().isBlank()) {
+                CarteiraCasa carteiraCasa = carteiraCasaRepository != null
+                        ? carteiraCasaRepository.obterOuCriar()
+                        : new CarteiraCasa();
+                for (DesafioX1 desafio : desafios) {
+                    desafio.liquidarComPlacarFinal(partida.getPlacar(), carteiraCasa);
+                }
+            } else if (OpcaoDesafio.placarTemGol(partida.getPlacar())) {
+                // Se a partida começou e qualquer time fez gol, convites PENDENTES expiram e devolvem o saldo retido
+                for (DesafioX1 desafio : desafios) {
+                    desafio.verificarExpiracaoPorGolOuFim();
+                }
+            }
+        }
+
         if (partida.getStatus() != StatusPartida.FINALIZADA
                 || partida.getPlacar() == null
                 || partida.getPlacar().isBlank()) {

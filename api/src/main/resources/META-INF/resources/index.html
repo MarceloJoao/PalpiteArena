@@ -3,57 +3,96 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PalpiteArena — Plataforma de Palpites Esportivos</title>
+  <title>PalpiteArena — Desafios X1 &amp; Apostas entre Usuários</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body data-modo="visitante">
 
   <!-- Cabeçalho Principal -->
   <header class="topo">
     <div class="topo-interno">
       <div class="marca">
         <span class="marca-icone">⚽</span>
-        <h1>Palpite<span>Arena</span></h1>
+        <div>
+          <h1>Palpite<span>Arena</span></h1>
+          <small id="subtitulo-modo" class="subtitulo-topo">Desafios X1 entre Torcedores</small>
+        </div>
       </div>
 
       <div class="topo-direita">
         <span id="status-api" class="badge badge-aviso">● Verificando API...</span>
+        <div id="info-carteira-topo"></div>
         <div id="info-usuario-topo">
           <span class="badge badge-aviso">Visitante (Não autenticado)</span>
         </div>
-        <a href="/q/swagger-ui" target="_blank" class="link-swagger">Swagger UI ↗</a>
+        <a href="/q/swagger-ui" target="_blank" class="link-swagger apenas-admin">Swagger UI ↗</a>
       </div>
     </div>
   </header>
 
   <!-- Navegação por Abas -->
   <nav class="menu-abas">
-    <button class="aba-btn ativa" data-aba="partidas">🏟️ Partidas &amp; Apuração</button>
-    <button class="aba-btn" data-aba="auth">🔐 Entrar / Cadastrar</button>
-    <button class="aba-btn" data-aba="palpites">🎯 Meus Palpites</button>
+    <button class="aba-btn ativa" data-aba="partidas">🏟️ Mural de Partidas</button>
+    <button class="aba-btn" data-aba="palpites">🎯 Minhas Apostas</button>
     <button class="aba-btn" data-aba="ranking">🏆 Ranking</button>
-    <button class="aba-btn" data-aba="admin">⚙️ Painel Admin</button>
+    <button class="aba-btn apenas-visitante" data-aba="auth">🔐 Entrar / Cadastrar</button>
+    <button class="aba-btn apenas-admin" data-aba="admin">⚙️ Painel Admin</button>
   </nav>
 
   <!-- Conteúdo das Abas -->
   <main class="container-principal">
 
-    <!-- ABA 1: MURAL DE PARTIDAS & API EXTERNA (HOJE E AMANHÃ) -->
+    <!-- ABA 1: MURAL DE PARTIDAS (9 Partidas da TheSportsDB + Desafio X1) -->
     <section id="aba-partidas" class="aba-conteudo ativa">
 
-      <!-- Bloco 1: Busca ao Vivo na API Externa (TheSportsDB - Hoje e Amanhã) -->
+      <!-- Banner de Convites Pendentes para o Usuário B (aparece quando logado e desafiado) -->
+      <div id="secao-convites-pendentes" class="painel-card painel-convites oculto">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>🔔 Você Recebeu Convite(s) de Desafio X1!</h2>
+            <p>Um usuário desafiou você para uma aposta. Escolha uma das opções restantes para aceitar (o valor será retido até o fim da partida) ou recuse o convite.</p>
+          </div>
+        </div>
+        <div id="lista-convites-pendentes" class="grade-partidas"></div>
+      </div>
+
+      <!-- Mural Principal: 9 Partidas buscadas na TheSportsDB e sincronizadas na Arena -->
       <div class="painel-card painel-destaque">
         <div class="cabecalho-secao">
           <div>
-            <h2>🌐 Partidas de Hoje e Amanhã — API Externa (TheSportsDB)</h2>
-            <p>Jogos reais de futebol buscados ao vivo na TheSportsDB. Importe para o banco da Arena com 1 clique para palpitar e testar a apuração via Go/gRPC.</p>
+            <h2>🏟️ Mural de Partidas (9 Jogos em Destaque — TheSportsDB)</h2>
+            <p id="descricao-mural">Clique em qualquer partida abaixo para abrir o card do jogo e <strong>desafiar outro usuário (Desafio X1)</strong> apostando no Vencedor Mandante, Empate ou Vencedor Visitante.</p>
+          </div>
+          <div class="acoes-secao">
+            <select id="filtro-status-arena" class="input-padrao">
+              <option value="">Todas as 9 Partidas</option>
+              <option value="AGENDADA">Abertas para Desafio</option>
+              <option value="FINALIZADA">Encerradas</option>
+            </select>
+            <button id="btn-recarregar-arena" class="btn btn-secundario" type="button">
+              🔄 Atualizar Mural
+            </button>
+          </div>
+        </div>
+
+        <div id="lista-partidas-arena" class="grade-partidas grade-9-partidas">
+          <p class="texto-vazio">Carregando as 9 partidas do Mural de Partidas...</p>
+        </div>
+      </div>
+
+      <!-- Bloco exclusivo do Admin: Busca manual de outras datas na TheSportsDB -->
+      <div class="painel-card apenas-admin">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>🌐 Catálogo Completo da API Externa (TheSportsDB — Modo Admin)</h2>
+            <p>Ferramenta administrativa para buscar jogos de outras datas na TheSportsDB e sincronizar com o banco da Arena.</p>
           </div>
           <div class="acoes-secao">
             <button id="btn-hoje-amanha" class="btn btn-secundario" type="button">
               📅 Hoje e Amanhã
             </button>
             <button id="btn-importar-todas" class="btn btn-primario" type="button">
-              📥 Importar Todas para a Arena
+              📥 Sincronizar 9 Jogos no Mural
             </button>
           </div>
         </div>
@@ -73,31 +112,7 @@
         </div>
 
         <div id="lista-partidas-externas" class="grade-partidas">
-          <p class="texto-vazio">Carregando partidas de hoje e amanhã na TheSportsDB...</p>
-        </div>
-      </div>
-
-      <!-- Bloco 2: Mural de Partidas salvas na API Quarkus (GET /partidas) -->
-      <div class="painel-card">
-        <div class="cabecalho-secao">
-          <div>
-            <h2>🏟️ Mural de Partidas da Arena (Banco Local / Quarkus)</h2>
-            <p>Partidas registradas na API Quarkus (<code>GET /partidas</code>). Envie seu palpite (<code>POST /palpites</code>) ou acione a apuração oficial via microsserviço Go + gRPC (<code>POST /partidas/{id}/apurar</code>).</p>
-          </div>
-          <div class="acoes-secao">
-            <select id="filtro-status-arena" class="input-padrao">
-              <option value="">Todos os Status</option>
-              <option value="AGENDADA">Agendadas (Abertas)</option>
-              <option value="FINALIZADA">Finalizadas (Apuradas)</option>
-            </select>
-            <button id="btn-recarregar-arena" class="btn btn-secundario" type="button">
-              🔄 Atualizar Mural
-            </button>
-          </div>
-        </div>
-
-        <div id="lista-partidas-arena" class="grade-partidas">
-          <p class="texto-vazio">Conecte a API Quarkus na porta 8080 para listar as partidas cadastradas no banco.</p>
+          <p class="texto-vazio">Carregando partidas da TheSportsDB...</p>
         </div>
       </div>
 
@@ -107,34 +122,34 @@
     <section id="aba-auth" class="aba-conteudo">
       <div class="grade-dupla">
         <!-- Card de Login -->
-        <div class="painel-card">
-          <h2>🔑 Entrar na Conta (JWT)</h2>
-          <p>Autentique-se via <code>POST /auth/login</code> para receber seu token JWT e registrar palpites.</p>
+        <div class="painel-card painel-destaque">
+          <h2>🔑 Entrar na Plataforma</h2>
+          <p>Entre com seu e-mail e senha para desafiar outros usuários, aceitar convites e acompanhar suas apostas.</p>
           <form id="form-login" class="formulario">
             <div class="campo-form">
               <label for="login-email">E-mail</label>
-              <input type="email" id="login-email" class="input-padrao" placeholder="ex: joao@ufrn.br ou admin@arenapro.com" required />
+              <input type="email" id="login-email" class="input-padrao" placeholder="ex: antonionnecp7@gmail.com ou admin@arenapro.com" required />
             </div>
             <div class="campo-form">
               <label for="login-senha">Senha</label>
               <input type="password" id="login-senha" class="input-padrao" placeholder="Sua senha (mín. 6 caracteres)" required />
             </div>
-            <button type="submit" class="btn btn-primario btn-bloco">Entrar com JWT</button>
+            <button type="submit" class="btn btn-primario btn-bloco">Entrar na Conta</button>
           </form>
         </div>
 
         <!-- Card de Cadastro -->
         <div class="painel-card">
-          <h2>📝 Criar Nova Conta</h2>
-          <p>Cadastre-se via <code>POST /usuarios</code>. Dica: e-mails iniciados com <code>admin@</code> ganham perfil <strong>ADMIN</strong> automaticamente.</p>
+          <h2>📝 Criar Conta de Cliente</h2>
+          <p>Crie sua conta para participar dos desafios X1. O administrador pode creditar saldo fictício na sua carteira para testes.</p>
           <form id="form-cadastro" class="formulario">
             <div class="campo-form">
               <label for="cad-nome">Nome completo</label>
-              <input type="text" id="cad-nome" class="input-padrao" placeholder="João Marcelo" required />
+              <input type="text" id="cad-nome" class="input-padrao" placeholder="Seu nome" required />
             </div>
             <div class="campo-form">
               <label for="cad-email">E-mail</label>
-              <input type="email" id="cad-email" class="input-padrao" placeholder="joao@ufrn.br" required />
+              <input type="email" id="cad-email" class="input-padrao" placeholder="seuemail@exemplo.com" required />
             </div>
             <div class="campo-form">
               <label for="cad-senha">Senha (mínimo 6 caracteres)</label>
@@ -146,73 +161,75 @@
       </div>
     </section>
 
-    <!-- ABA 3: MEUS PALPITES (GET /palpites, PUT /palpites/{id}, DELETE /palpites/{id}) -->
+    <!-- ABA 3: MINHAS APOSTAS (Desafios X1 do Usuário) -->
     <section id="aba-palpites" class="aba-conteudo">
       <div class="painel-card painel-destaque">
         <div class="cabecalho-secao">
           <div>
-            <h2>🎯 Meus Palpites &amp; Histórico de Pontuação</h2>
-            <p>Acompanhe seus palpites registrados (<code>GET /palpites</code>), altere o placar previsto (<code>PUT /palpites/{id}</code>) ou remova um palpite (<code>DELETE /palpites/{id}</code>).</p>
+            <h2>🎯 Minhas Apostas (Desafios X1)</h2>
+            <p>Clique em qualquer card de aposta abaixo para expandir os detalhes completos: quem é o seu adversário, o valor retido, a opção escolhida por cada um e o resultado/comissão.</p>
           </div>
           <div class="acoes-secao">
             <select id="filtro-escopo-palpites" class="input-padrao">
-              <option value="meus">Apenas Meus Palpites</option>
-              <option value="todos">Todos os Palpites da Arena</option>
+              <option value="todos_meus">Todas as Minhas Apostas</option>
+              <option value="PENDENTE">Convites Pendentes</option>
+              <option value="ACEITO">Apostas Fechadas (Em Jogo)</option>
+              <option value="FINALIZADO">Apostas Finalizadas</option>
             </select>
             <button id="btn-recarregar-palpites" class="btn btn-secundario" type="button">
-              🔄 Atualizar Palpites
+              🔄 Atualizar Apostas
             </button>
           </div>
         </div>
 
-        <!-- Resumo de Desempenho do Torcedor -->
+        <!-- Resumo Financeiro e de Apostas do Cliente -->
         <div id="resumo-palpites" class="grade-estatisticas">
           <div class="card-estatistica">
-            <span class="estatistica-rotulo">Total de Palpites</span>
-            <strong id="stat-total-palpites" class="estatistica-valor">0</strong>
+            <span class="estatistica-rotulo">💰 Saldo Disponível</span>
+            <strong id="stat-saldo-disponivel" class="estatistica-valor destaque-verde">R$ 0,00</strong>
           </div>
           <div class="card-estatistica">
-            <span class="estatistica-rotulo">Pontos Somados</span>
-            <strong id="stat-total-pontos" class="estatistica-valor destaque-verde">0 pts</strong>
+            <span class="estatistica-rotulo">🔒 Saldo Retido em Jogo</span>
+            <strong id="stat-saldo-retido" class="estatistica-valor destaque-amarelo">R$ 0,00</strong>
           </div>
           <div class="card-estatistica">
-            <span class="estatistica-rotulo">Placares Exatos (3 pts)</span>
-            <strong id="stat-cravadas" class="estatistica-valor destaque-azul">0</strong>
+            <span class="estatistica-rotulo">⚔️ Desafios Ativos / Pendentes</span>
+            <strong id="stat-desafios-ativos" class="estatistica-valor destaque-azul">0</strong>
           </div>
           <div class="card-estatistica">
-            <span class="estatistica-rotulo">Aguardando Resultado</span>
-            <strong id="stat-pendentes" class="estatistica-valor">0</strong>
+            <span class="estatistica-rotulo">🏆 Desafios Vencidos</span>
+            <strong id="stat-desafios-vencidos" class="estatistica-valor">0</strong>
           </div>
         </div>
 
-        <!-- Lista de Cards de Palpites -->
+        <!-- Lista de Cards de Apostas / Desafios X1 -->
         <div id="lista-meus-palpites" class="grade-partidas">
-          <p class="texto-vazio">Faça login e registre um palpite no Mural de Partidas para acompanhar aqui.</p>
+          <p class="texto-vazio">Faça login e desafie um usuário no Mural de Partidas para acompanhar suas apostas aqui.</p>
         </div>
       </div>
     </section>
 
-    <!-- ABA 4: RANKING DE TORCEDORES & REGRAS (GET /usuarios/ranking) -->
+    <!-- ABA 4: RANKING & REGRAS DO DESAFIO X1 -->
     <section id="aba-ranking" class="aba-conteudo">
-      <!-- Quadro de Regras do Bolão -->
+      <!-- Quadro de Regras do Desafio X1 -->
       <div class="painel-card">
-        <h2>📜 Regras Oficiais de Pontuação da PalpiteArena</h2>
-        <p>Os pontos são calculados automaticamente assim que uma partida é finalizada (via API externa TheSportsDB + Go/gRPC ou pelo Painel Admin):</p>
+        <h2>📜 Como Funciona o Desafio X1 na PalpiteArena</h2>
+        <p>Apostas diretas entre dois perfis de usuários com retenção automática de saldo e liquidação ao término da partida:</p>
         <div class="grade-regras">
           <div class="card-regra regra-ouro">
-            <span class="regra-pontos">🎯 +3 Pontos</span>
-            <strong>Placar Exato (Cravada)</strong>
-            <p>Acertou exatamente o número de gols do time da casa e do visitante (ex.: palpitou <code>2x1</code> e o jogo terminou <code>2x1</code>).</p>
+            <span class="regra-pontos">⚔️ 1. Desafio &amp; Escolhas Opostas</span>
+            <strong>Vitória Mandante • Empate • Vitória Visitante</strong>
+            <p>O Usuário A escolhe uma partida no Mural, informa o e-mail do Usuário B, o resultado e o valor. Para aceitar, B deve ter o mesmo saldo e escolher uma das outras 2 opções restantes.</p>
           </div>
           <div class="card-regra regra-prata">
-            <span class="regra-pontos">✅ +1 Ponto</span>
-            <strong>Vencedor ou Empate</strong>
-            <p>Acertou o time vencedor ou que houve empate, mas com placar diferente (ex.: palpitou <code>1x0</code> e terminou <code>3x1</code>, ou palpitou <code>0x0</code> e terminou <code>2x2</code>).</p>
+            <span class="regra-pontos">🔒 2. Retenção &amp; Expiração</span>
+            <strong>Saldo Travado até o Apito Final</strong>
+            <p>O Usuário A pode cancelar o convite somente antes de B aceitar. Se a partida começar e sair gol antes do aceite, o convite expira e o saldo volta para A. Aceita a aposta, o valor dos dois fica retido.</p>
           </div>
           <div class="card-regra regra-bronze">
-            <span class="regra-pontos">❌ 0 Pontos</span>
-            <strong>Resultado Incorreto</strong>
-            <p>O resultado final da partida (vitória do mandante, empate ou vitória do visitante) foi diferente do previsto.</p>
+            <span class="regra-pontos">🏦 3. Prêmio &amp; Comissão da Casa (5%)</span>
+            <strong>Liquidação Automática no Fim do Jogo</strong>
+            <p>Quem acertar recebe 100% do que apostou de volta + 95% da aposta do adversário (5% vão para a Carteira Casa). Se nenhum dos dois acertar, ambos recebem seu valor de volta com desconto de 2,5% de cada para a Casa.</p>
           </div>
         </div>
       </div>
@@ -221,12 +238,12 @@
       <div class="painel-card painel-destaque">
         <div class="cabecalho-secao">
           <div>
-            <h2>🏆 Classificação Geral de Torcedores</h2>
-            <p>Ranking oficial ordenado pela pontuação total acumulada (<code>GET /usuarios/ranking</code>).</p>
+            <h2>🏆 Classificação de Usuários da Plataforma</h2>
+            <p>Usuários cadastrados na PalpiteArena.</p>
           </div>
           <div class="acoes-secao">
             <button id="btn-recarregar-ranking" class="btn btn-secundario" type="button">
-              🔄 Atualizar Ranking
+              🔄 Atualizar Lista
             </button>
           </div>
         </div>
@@ -236,14 +253,15 @@
             <thead>
               <tr>
                 <th>Posição</th>
-                <th>Torcedor</th>
-                <th>E-mail</th>
-                <th class="col-direita">Pontuação Total</th>
+                <th>Usuário</th>
+                <th>E-mail (para desafiar)</th>
+                <th class="col-direita">Pontos (Palpites)</th>
+                <th class="col-direita">Saldo Disponível</th>
               </tr>
             </thead>
             <tbody id="corpo-tabela-ranking">
               <tr>
-                <td colspan="4" class="texto-vazio">Carregando ranking de torcedores...</td>
+                <td colspan="4" class="texto-vazio">Carregando usuários...</td>
               </tr>
             </tbody>
           </table>
@@ -251,19 +269,107 @@
       </div>
     </section>
 
-    <!-- ABA 5: PAINEL ADMINISTRATIVO (POST/DELETE /times, POST/PUT/DELETE /partidas) -->
+    <!-- ABA 5: PAINEL ADMINISTRATIVO (Exclusivo para admin@arenapro.com) -->
     <section id="aba-admin" class="aba-conteudo">
       <div id="aviso-permissao-admin" class="painel-card"></div>
 
+      <!-- Bloco 1: Carteira Casa (Comissões de 5%) + Crédito de Saldo Fictício -->
       <div class="grade-dupla">
-        <!-- Card 1: Cadastro de Time -->
+        <!-- Card da Carteira Casa -->
+        <div class="painel-card painel-destaque card-carteira-casa">
+          <div class="cabecalho-secao">
+            <div>
+              <h2>🏦 Carteira Casa (Banco da Plataforma)</h2>
+              <p>Receita acumulada automaticamente com a comissão de <strong>5%</strong> sobre as apostas liquidadas (ou <strong>2,5% de cada jogador</strong> quando nenhum dos dois acerta).</p>
+            </div>
+            <span class="badge badge-online">COMISSÃO OFICIAL 5%</span>
+          </div>
+          <div class="grade-estatisticas" style="margin-top: 14px; margin-bottom: 0;">
+            <div class="card-estatistica">
+              <span class="estatistica-rotulo">💰 Saldo Total da Carteira Casa</span>
+              <strong id="admin-saldo-casa" class="estatistica-valor destaque-verde">R$ 0,00</strong>
+            </div>
+            <div class="card-estatistica">
+              <span class="estatistica-rotulo">⚖️ Apostas X1 Liquidadas</span>
+              <strong id="admin-total-liquidadas" class="estatistica-valor destaque-azul">0</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card para Creditar Saldo Fictício nos Clientes -->
+        <div class="painel-card painel-destaque">
+          <h2>💳 Creditar Saldo Fictício em Usuário</h2>
+          <p>Adicione saldo na carteira de qualquer cliente para que ele possa criar ou aceitar desafios X1 (<code>POST /usuarios/{id}/creditar-saldo</code>).</p>
+          <form id="form-creditar-saldo" class="formulario">
+            <div class="campo-form">
+              <label for="credito-usuario-select">Selecionar Usuário</label>
+              <select id="credito-usuario-select" class="input-padrao" required>
+                <option value="">Selecione um usuário cadastrado...</option>
+              </select>
+            </div>
+            <div class="campo-form">
+              <label for="credito-valor">Valor a Creditar (R$)</label>
+              <input type="number" id="credito-valor" class="input-padrao" min="1" step="0.01" value="100.00" placeholder="ex: 100.00" required />
+            </div>
+            <button type="submit" class="btn btn-primario btn-bloco">💰 Creditar Saldo na Conta</button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Tabela de Carteiras dos Usuários (Visão Admin) -->
+      <div class="painel-card">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>👥 Carteiras dos Usuários Cadastrados</h2>
+            <p>Acompanhe o saldo disponível e o saldo retido em apostas de todos os usuários da plataforma.</p>
+          </div>
+          <button id="btn-recarregar-admin" class="btn btn-secundario" type="button">
+            🔄 Atualizar Painel Admin
+          </button>
+        </div>
+        <div class="tabela-container">
+          <table class="tabela-ranking">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Nome</th>
+                <th>E-mail</th>
+                <th>Perfil</th>
+                <th class="col-direita">Saldo Disponível</th>
+                <th class="col-direita">Saldo Retido</th>
+              </tr>
+            </thead>
+            <tbody id="corpo-tabela-usuarios-admin">
+              <tr>
+                <td colspan="6" class="texto-vazio">Carregando usuários...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Card 3: Gerenciamento e Encerramento de Partidas (Dispara Liquidação Automática dos Desafios X1) -->
+      <div class="painel-card painel-destaque">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>⚖️ Simular Gol / Finalizar Partidas &amp; Liquidar Apostas X1</h2>
+            <p>Ao finalizar uma partida com o placar oficial (ou apurar via Go/gRPC), a API liquida automaticamente todas as apostas X1 aceitas, credita o vencedor descontando 5% para a Carteira Casa e expira convites pendentes se sair gol.</p>
+          </div>
+        </div>
+        <div id="lista-partidas-admin" class="grade-partidas">
+          <p class="texto-vazio">Carregando partidas para gerenciamento...</p>
+        </div>
+      </div>
+
+      <div class="grade-dupla">
+        <!-- Card: Cadastro Manual de Time -->
         <div class="painel-card">
           <h2>🛡️ Cadastrar Novo Time</h2>
           <p>Adicione um clube manualmente no banco (<code>POST /times</code>).</p>
           <form id="form-criar-time" class="formulario">
             <div class="campo-form">
               <label for="time-nome">Nome do Clube</label>
-              <input type="text" id="time-nome" class="input-padrao" placeholder="ex: Flamengo" required />
+              <input type="text" id="time-nome" class="input-padrao" placeholder="ex: São Paulo" required />
             </div>
             <div class="campo-form">
               <label for="time-escudo">URL do Escudo (opcional)</label>
@@ -273,7 +379,7 @@
           </form>
         </div>
 
-        <!-- Card 2: Criação Manual de Partida -->
+        <!-- Card: Criação Manual de Partida -->
         <div class="painel-card">
           <h2>🏟️ Agendar Nova Partida</h2>
           <p>Crie um confronto entre dois times cadastrados (<code>POST /partidas</code>).</p>
@@ -299,26 +405,9 @@
         </div>
       </div>
 
-      <!-- Card 3: Gerenciamento e Encerramento Manual de Partidas -->
-      <div class="painel-card painel-destaque">
-        <div class="cabecalho-secao">
-          <div>
-            <h2>⚖️ Gerenciar &amp; Finalizar Partidas Manualmente</h2>
-            <p>Defina o placar final manualmente (<code>PUT /partidas/{id}</code>) para apurar os pontos e disparar notificações via Go/gRPC, ou remova partidas (<code>DELETE /partidas/{id}</code>).</p>
-          </div>
-          <button id="btn-recarregar-admin" class="btn btn-secundario" type="button">
-            🔄 Atualizar Dados
-          </button>
-        </div>
-        <div id="lista-partidas-admin" class="grade-partidas">
-          <p class="texto-vazio">Carregando partidas para gerenciamento...</p>
-        </div>
-      </div>
-
-      <!-- Card 4: Lista de Times Cadastrados -->
+      <!-- Lista de Times Cadastrados -->
       <div class="painel-card">
         <h2>📋 Times Cadastrados no Banco (<code>GET /times</code>)</h2>
-        <p>Clubes disponíveis para partidas. Você pode remover clubes que ainda não estejam vinculados a nenhuma partida (<code>DELETE /times/{id}</code>).</p>
         <div id="lista-times-admin" class="grade-times-admin">
           <p class="texto-vazio">Carregando times...</p>
         </div>
@@ -326,6 +415,95 @@
     </section>
 
   </main>
+
+  <!-- MODAL / CARD EXPANDIDO DA PARTIDA PARA CRIAR DESAFIO X1 -->
+  <div id="modal-desafio-overlay" class="modal-overlay oculto">
+    <div class="modal-card">
+      <div class="modal-topo">
+        <div>
+          <span class="badge badge-online">⚔️ NOVO DESAFIO X1</span>
+          <h2 id="modal-desafio-titulo" style="margin-top: 6px;">Desafiar Usuário na Partida</h2>
+        </div>
+        <button type="button" id="btn-fechar-modal-desafio" class="btn-fechar-modal" title="Fechar">✕</button>
+      </div>
+
+      <!-- Resumo visual da partida selecionada -->
+      <div id="modal-desafio-confronto" class="confronto" style="margin: 14px 0;"></div>
+
+      <form id="form-criar-desafio" class="formulario">
+        <input type="hidden" id="desafio-partida-id" />
+
+        <div class="campo-form">
+          <label for="desafio-email-adversario">1️⃣ E-mail do Usuário Desafiado (Usuário "B")</label>
+          <input
+            type="email"
+            id="desafio-email-adversario"
+            list="lista-emails-sugeridos"
+            class="input-padrao"
+            placeholder="Digite ou escolha o e-mail do adversário..."
+            required
+          />
+          <datalist id="lista-emails-sugeridos"></datalist>
+          <small class="dica-campo">Um aviso será disparado para o e-mail do desafiado via microsserviço Go/gRPC.</small>
+        </div>
+
+        <div class="campo-form">
+          <label>2️⃣ Em qual resultado você está apostando?</label>
+          <div class="grade-opcoes-desafio" id="opcoes-desafio-container">
+            <label class="opcao-desafio-card">
+              <input type="radio" name="opcaoDesafiante" value="MANDANTE" required />
+              <span class="opcao-titulo" id="label-opcao-mandante">🏠 Vitória Mandante</span>
+              <small>Time da casa vence</small>
+            </label>
+            <label class="opcao-desafio-card">
+              <input type="radio" name="opcaoDesafiante" value="EMPATE" required />
+              <span class="opcao-titulo">🤝 Empate</span>
+              <small>Placar igual</small>
+            </label>
+            <label class="opcao-desafio-card">
+              <input type="radio" name="opcaoDesafiante" value="VISITANTE" required />
+              <span class="opcao-titulo" id="label-opcao-visitante">✈️ Vitória Visitante</span>
+              <small>Time visitante vence</small>
+            </label>
+          </div>
+        </div>
+
+        <div class="campo-form">
+          <label for="desafio-valor">3️⃣ Valor da Aposta entre vocês dois (R$)</label>
+          <input
+            type="number"
+            id="desafio-valor"
+            class="input-padrao"
+            min="1"
+            step="0.01"
+            value="50.00"
+            placeholder="ex: 50.00"
+            required
+          />
+          <small id="desafio-info-saldo" class="dica-campo">Seu saldo disponível será verificado e o valor ficará retido.</small>
+        </div>
+
+        <div class="modal-acoes">
+          <button type="button" id="btn-cancelar-modal-desafio" class="btn btn-secundario">Voltar</button>
+          <button type="submit" class="btn btn-primario">⚔️ Enviar Convite de Desafio X1</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL DE DETALHES DA APOSTA (Ao clicar em um card em Minhas Apostas) -->
+  <div id="modal-detalhe-aposta-overlay" class="modal-overlay oculto">
+    <div class="modal-card">
+      <div class="modal-topo">
+        <div>
+          <span id="detalhe-aposta-badge" class="badge badge-info">DETALHES DA APOSTA X1</span>
+          <h2 id="detalhe-aposta-titulo" style="margin-top: 6px;">Partida</h2>
+        </div>
+        <button type="button" id="btn-fechar-modal-detalhe" class="btn-fechar-modal" title="Fechar">✕</button>
+      </div>
+      <div id="detalhe-aposta-corpo" style="margin-top: 14px;"></div>
+    </div>
+  </div>
 
   <!-- Container para alertas flutuantes (Toasts) -->
   <div id="toast-container"></div>

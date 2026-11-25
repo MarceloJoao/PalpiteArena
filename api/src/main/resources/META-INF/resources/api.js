@@ -1,30 +1,60 @@
 /**
- * Cliente HTTP e Controlador do Front-end da PalpiteArena (api.js)
- * - Busca partidas reais de Hoje e Amanhã na API externa TheSportsDB;
- * - Permite importar partidas externas para o banco da API Quarkus (POST /times + POST /partidas);
- * - Lista o Mural de Partidas (GET /partidas), registra palpites (POST /palpites)
- *   e aciona a apuração oficial via microsserviço Go + gRPC (POST /partidas/{id}/apurar);
- * - Gerencia autenticação JWT (POST /auth/login, GET /auth/eu, POST /usuarios).
+ * PalpiteArena — Controlador Front-end com 2 Comportamentos (Cliente vs. Administrador)
+ * e Função Desafio X1 (Apostas entre Perfis de Usuário com Retenção e Comissão de 5%).
  */
 
 const CHAVE_SESSAO = 'palpitearena_sessao';
 const URL_THESPORTSDB_DIA = 'https://www.thesportsdb.com/api/v1/json/123/eventsday.php';
+const LIMITE_MURAL_PARTIDAS = 9;
 
-// Detecta se está rodando servido pela própria API (:8080 ou Render) ou aberto via Live Server / arquivo local
-const API_BASE_URL =
-  window.location.protocol === 'file:' || window.location.port === '5500'
-    ? 'http://localhost:8080'
-    : '';
+// Detecta se está servido pela própria API (:8080 ou nuvem Render) ou aberto via Live Server / arquivo local
+// Endereço da API: detectado automaticamente (mesma origem, localhost:8080 ou 127.0.0.1:8080)
+let API_BASE_URL = window.location.protocol === 'file:' ? 'http://localhost:8080' : '';
+let appInicializado = false;
 
-// Escudo SVG padrão caso algum time não possua imagem na API
+async function sondarApi(base) {
+  const controlador = new AbortController();
+  const temporizador = setTimeout(() => controlador.abort(), 3000);
+  try {
+    const resposta = await fetch(`${base}/q/health/live`, {
+      signal: controlador.signal,
+      headers: { Accept: 'application/json' },
+    });
+    if (!resposta.ok) return false;
+    const corpo = await resposta.json();
+    return Boolean(corpo && corpo.status === 'UP');
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(temporizador);
+  }
+}
+
+async function detectarBaseApi() {
+  const ehHttp = window.location.protocol.startsWith('http');
+  const candidatos = [API_BASE_URL];
+  if (ehHttp) candidatos.push('');
+  candidatos.push('http://localhost:8080', 'http://127.0.0.1:8080');
+  for (const candidato of [...new Set(candidatos)]) {
+    if (await sondarApi(candidato)) {
+      API_BASE_URL = candidato;
+      return true;
+    }
+  }
+  return false;
+}
+
 const ESCUDO_PADRAO =
   "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><path fill='%231e293b' stroke='%2310b981' stroke-width='3' d='M32 6L10 14v18c0 14 9.4 23.6 22 26 12.6-2.4 22-12 22-26V14L32 6z'/><text x='32' y='39' font-size='20' text-anchor='middle' fill='%23f8fafc' font-family='sans-serif' font-weight='bold'>⚽</text></svg>";
 
 let partidasExternasCache = [];
+let partidasArenaCache = [];
+let desafiosCache = [];
+let usuarioLogadoDados = null;
 let apiOnline = false;
 
 /* ==========================================================================
-   1. SESSÃO JWT E CLIENTE HTTP (RFC 9457 Problem Details)
+   1. SESSÃO JWT, MODO DE EXIBIÇÃO (CLIENTE vs. ADMIN) E CLIENTE HTTP
    ========================================================================== */
 
 function obterSessao() {
@@ -36,13 +66,45 @@ function obterSessao() {
   }
 }
 
+function ehAdmin() {
+  const sessao = obterSessao();
+  if (!sessao || !sessao.token) return false;
+  const email = (sessao.email || '').trim().toLowerCase();
+  return sessao.papel === 'ADMIN' || email === 'admin@arenapro.com' || email.startsWith('admin@');
+}
+
 function salvarSessao(dadosLogin) {
   if (!dadosLogin) {
     localStorage.removeItem(CHAVE_SESSAO);
+    usuarioLogadoDados = null;
   } else {
     localStorage.setItem(CHAVE_SESSAO, JSON.stringify(dadosLogin));
   }
+  aplicarModoVisual();
   atualizarCabecalhoUsuario();
+}
+
+/**
+ * Alterna o comportamento da página entre:
+ * - "admin"     (admin@arenapro.com)
+ * - "cliente"   (demais usuários logados, ex.: antonionnecp7@gmail.com)
+ * - "visitante" (não logado)
+ */
+function aplicarModoVisual() {
+  const sessao = obterSessao();
+  const subtitulo = document.getElementById('subtitulo-modo');
+  if (!sessao || !sessao.token) {
+    document.body.dataset.modo = 'visitante';
+    if (subtitulo) subtitulo.textContent = 'Visitante — Entre para desafiar outros usuários';
+    return;
+  }
+  if (ehAdmin()) {
+    document.body.dataset.modo = 'admin';
+    if (subtitulo) subtitulo.textContent = 'Modo Administrador — Gestão de Partidas, Saldo e Carteira Casa';
+  } else {
+    document.body.dataset.modo = 'cliente';
+    if (subtitulo) subtitulo.textContent = 'Modo Cliente — Desafios X1 entre Usuários';
+  }
 }
 
 async function requisicaoApi(caminho, opcoes = {}) {
@@ -54,10 +116,17 @@ async function requisicaoApi(caminho, opcoes = {}) {
     ...(opcoes.headers || {}),
   };
 
-  const resposta = await fetch(`${API_BASE_URL}${caminho}`, {
-    ...opcoes,
-    headers: cabecalhos,
-  });
+  let resposta;
+  try {
+    resposta = await fetch(`${API_BASE_URL}${caminho}`, {
+      ...opcoes,
+      headers: cabecalhos,
+    });
+  } catch {
+    throw new Error(
+      'Não foi possível conectar à API. Verifique se o sistema está ligado (docker compose up -d) e abra http://localhost:8080'
+    );
+  }
 
   if (resposta.status === 204) {
     return null;
@@ -80,18 +149,24 @@ async function requisicaoApi(caminho, opcoes = {}) {
   return corpo;
 }
 
+function erroComStatus(mensagem, statusHttp) {
+  const erro = new Error(mensagem);
+  erro.status = statusHttp;
+  return erro;
+}
+
 function extrairErroProblemDetails(problema, statusHttp) {
   if (!problema || typeof problema !== 'object') {
-    return new Error(`Erro HTTP ${statusHttp} ao comunicar com a API.`);
+    return erroComStatus(`Erro HTTP ${statusHttp} ao comunicar com a API.`, statusHttp);
   }
   if (Array.isArray(problema.errors) && problema.errors.length > 0) {
     const detalhesCampos = problema.errors
       .map((e) => `${e.campo}: ${e.mensagem}`)
       .join(' | ');
-    return new Error(`${problema.title || 'Dados inválidos'} — ${detalhesCampos}`);
+    return erroComStatus(`${problema.title || 'Dados inválidos'} — ${detalhesCampos}`, statusHttp);
   }
   const mensagem = problema.detail || problema.title || `Erro HTTP ${statusHttp}`;
-  return new Error(mensagem);
+  return erroComStatus(mensagem, statusHttp);
 }
 
 function mostrarToast(mensagem, tipo = 'sucesso') {
@@ -109,7 +184,26 @@ function mostrarToast(mensagem, tipo = 'sucesso') {
   }, 4500);
 }
 
+function formatarMoeda(valor) {
+  const num = Number(valor || 0);
+  return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function traduzirOpcaoDesafio(opcao, partida = null) {
+  const nomeCasa = partida?.timeCasa?.nome || 'Time Mandante';
+  const nomeFora = partida?.timeFora?.nome || 'Time Visitante';
+  if (opcao === 'MANDANTE') return `🏠 Vitória ${nomeCasa}`;
+  if (opcao === 'VISITANTE') return `✈️ Vitória ${nomeFora}`;
+  if (opcao === 'EMPATE') return '🤝 Empate';
+  return 'Aguardando escolha';
+}
+
 function selecionarAba(idAba) {
+  // Impede cliente normal de abrir a aba admin
+  if (idAba === 'admin' && !ehAdmin()) {
+    idAba = 'partidas';
+  }
+
   document.querySelectorAll('.aba-conteudo').forEach((secao) => {
     secao.classList.toggle('ativa', secao.id === `aba-${idAba}`);
   });
@@ -118,79 +212,134 @@ function selecionarAba(idAba) {
   });
 
   if (idAba === 'palpites') {
-    carregarMeusPalpites();
+    carregarMinhasApostas();
   } else if (idAba === 'ranking') {
     carregarRanking();
   } else if (idAba === 'admin') {
     carregarPainelAdmin();
   } else if (idAba === 'partidas' && apiOnline) {
     carregarPartidasArena();
+    carregarConvitesPendentes();
   }
 }
 
 /* ==========================================================================
-   2. SAÚDE DA API E AUTENTICAÇÃO JWT (Etapa 2)
+   2. SAÚDE DA API, CARTEIRA NO TOPO E AUTENTICAÇÃO JWT
    ========================================================================== */
 
 async function verificarStatusApi() {
   const indicador = document.getElementById('status-api');
-  if (!indicador) return false;
+  const estavaOnline = apiOnline;
+  const online = await detectarBaseApi();
+  apiOnline = online;
 
-  try {
-    const saude = await requisicaoApi('/q/health/live');
-    if (saude && saude.status === 'UP') {
-      indicador.textContent = '● API Quarkus Online';
-      indicador.className = 'badge badge-online';
-      apiOnline = true;
-      return true;
-    }
-    indicador.textContent = '● API Instável';
-    indicador.className = 'badge badge-aviso';
-    apiOnline = false;
-    return false;
-  } catch {
-    indicador.textContent = '● API Quarkus Offline';
-    indicador.className = 'badge badge-offline';
-    apiOnline = false;
-    return false;
+  if (indicador) {
+    indicador.textContent = online ? '● API Online' : '● API Offline';
+    indicador.className = online ? 'badge badge-online' : 'badge badge-offline';
   }
+
+  // Quando a API volta a responder depois de ter ficado fora do ar, recarrega os dados automaticamente
+  if (online && !estavaOnline && appInicializado) {
+    await carregarDadosIniciais(true);
+  }
+  return online;
 }
 
-async function validarSessaoExistenteNoBanco() {
+function chaveConfronto(casa, fora) {
+  const norm = (t) => String(t || '').trim().toLowerCase();
+  return `${norm(casa)}|${norm(fora)}`;
+}
+
+async function carregarDadosIniciais(online) {
+  if (!online) {
+    await carregarPartidasArena();
+    return;
+  }
+  await sincronizarDadosUsuarioLogado();
+  const partidas = await carregarPartidasArena();
+  const chavesBanco = new Set(partidasArenaCache.map((p) => chaveConfronto(p.timeCasa?.nome, p.timeFora?.nome)));
+  const faltam = partidasExternasCache.some((ev) => !chavesBanco.has(chaveConfronto(ev.strHomeTeam, ev.strAwayTeam)));
+  if (faltam || partidas.length === 0) {
+    await importarTodasPartidasExternas(true);
+  }
+  await carregarConvitesPendentes();
+}
+
+async function sincronizarDadosUsuarioLogado() {
   const sessao = obterSessao();
-  if (!sessao || !sessao.usuarioId) return;
+  const containerCarteira = document.getElementById('info-carteira-topo');
+  if (!sessao || !sessao.usuarioId) {
+    if (containerCarteira) containerCarteira.innerHTML = '';
+    return null;
+  }
+
   try {
-    await requisicaoApi(`/usuarios/${sessao.usuarioId}`);
-  } catch {
-    // Caso o banco tenha sido recriado e o usuario antigo nao exista mais, limpa a sessao fantasma
-    salvarSessao(null);
+    const usuario = await requisicaoApi(`/usuarios/${sessao.usuarioId}`);
+    usuarioLogadoDados = usuario;
+
+    if (containerCarteira) {
+      if (ehAdmin()) {
+        const carteiraCasa = await requisicaoApi('/desafios/carteira-casa');
+        containerCarteira.innerHTML = `
+          <span class="badge badge-online" title="Comissões de 5% acumuladas pela plataforma">
+            🏦 Carteira Casa: ${formatarMoeda(carteiraCasa?.saldoTotal || 0)}
+          </span>
+        `;
+      } else {
+        containerCarteira.innerHTML = `
+          <span class="badge badge-online" title="Saldo disponível para desafiar ou aceitar apostas">
+            💰 Saldo: ${formatarMoeda(usuario.saldo)}
+          </span>
+          <span class="badge badge-aviso" title="Saldo retido em apostas pendentes ou em andamento">
+            🔒 Retido: ${formatarMoeda(usuario.saldoRetido)}
+          </span>
+        `;
+      }
+    }
+    return usuario;
+  } catch (erro) {
+    // Só encerra a sessão se o usuário realmente não existir mais no banco (404).
+    // Falhas de rede ou erros temporários da API NÃO derrubam o login.
+    if (erro && erro.status === 404) {
+      salvarSessao(null);
+    }
+    return null;
   }
 }
 
 function atualizarCabecalhoUsuario() {
+  aplicarModoVisual();
   const container = document.getElementById('info-usuario-topo');
   if (!container) return;
 
   const sessao = obterSessao();
   if (!sessao || !sessao.token) {
     container.innerHTML = `<span class="badge badge-aviso">Visitante (Não autenticado)</span>`;
+    const carteira = document.getElementById('info-carteira-topo');
+    if (carteira) carteira.innerHTML = '';
     return;
   }
 
-  const classePapel = sessao.papel === 'ADMIN' ? 'badge-info' : 'badge-online';
+  const admin = ehAdmin();
+  const rotuloPerfil = admin ? 'ADMIN' : 'CLIENTE';
+  const classePapel = admin ? 'badge-info' : 'badge-online';
+
   container.innerHTML = `
     <span class="badge ${classePapel}">
-      👤 ${escaparHtml(sessao.nome)} (${escaparHtml(sessao.papel || 'TORCEDOR')})
+      ${admin ? '🛡️' : '👤'} ${escaparHtml(sessao.nome)} (${rotuloPerfil})
     </span>
     <button id="btn-sair" class="btn btn-secundario btn-pequeno" type="button">Sair</button>
   `;
 
-  const btnSair = document.getElementById('btn-sair');
-  if (btnSair) {
-    btnSair.addEventListener('click', () => {
-      salvarSessao(null);
-      mostrarToast('Sessão encerrada com sucesso.');
-    });
+  document.getElementById('btn-sair')?.addEventListener('click', () => {
+    salvarSessao(null);
+    document.getElementById('secao-convites-pendentes')?.classList.add('oculto');
+    mostrarToast('Sessão encerrada com sucesso.');
+    selecionarAba('auth');
+  });
+
+  if (apiOnline) {
+    sincronizarDadosUsuarioLogado();
   }
 }
 
@@ -199,14 +348,28 @@ async function realizarLogin(evento) {
   const email = document.getElementById('login-email').value.trim();
   const senha = document.getElementById('login-senha').value;
 
+  if (!(await verificarStatusApi())) {
+    mostrarToast('A API está desligada. Suba o sistema (docker compose up -d) e abra http://localhost:8080', 'erro');
+    return;
+  }
+
   try {
     const resposta = await requisicaoApi('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, senha }),
     });
     salvarSessao(resposta);
-    mostrarToast(`Bem-vindo(a), ${resposta.nome}! Perfil: ${resposta.papel}`);
-    selecionarAba('partidas');
+    await sincronizarDadosUsuarioLogado();
+    await carregarPartidasArena();
+    await carregarConvitesPendentes();
+
+    if (ehAdmin()) {
+      mostrarToast(`Bem-vindo, Administrador (${resposta.nome})! Painel Admin e Carteira Casa liberados.`);
+      selecionarAba('admin');
+    } else {
+      mostrarToast(`Bem-vindo(a), ${resposta.nome}! Escolha uma das 9 partidas no Mural para desafiar outro usuário.`);
+      selecionarAba('partidas');
+    }
   } catch (erro) {
     mostrarToast(erro.message, 'erro');
   }
@@ -218,6 +381,11 @@ async function realizarCadastro(evento) {
   const email = document.getElementById('cad-email').value.trim();
   const senha = document.getElementById('cad-senha').value;
 
+  if (!(await verificarStatusApi())) {
+    mostrarToast('A API está desligada. Suba o sistema (docker compose up -d) e abra http://localhost:8080', 'erro');
+    return;
+  }
+
   try {
     await requisicaoApi('/usuarios', {
       method: 'POST',
@@ -228,16 +396,19 @@ async function realizarCadastro(evento) {
       body: JSON.stringify({ email, senha }),
     });
     salvarSessao(loginAuto);
-    mostrarToast(`Conta criada! Logado como ${loginAuto.nome} (${loginAuto.papel}).`);
+    await sincronizarDadosUsuarioLogado();
+    await carregarPartidasArena();
+    await carregarConvitesPendentes();
+    mostrarToast(`Conta criada com sucesso! Logado como ${loginAuto.nome}.`);
     document.getElementById('form-cadastro').reset();
-    selecionarAba('partidas');
+    selecionarAba(ehAdmin() ? 'admin' : 'partidas');
   } catch (erro) {
     mostrarToast(erro.message, 'erro');
   }
 }
 
 /* ==========================================================================
-   3. BUSCA DE PARTIDAS DE HOJE E AMANHÃ NA API EXTERNA (TheSportsDB)
+   3. BUSCA DE 9 PARTIDAS NA API EXTERNA (TheSportsDB) E MURAL DE PARTIDAS
    ========================================================================== */
 
 function obterDataLocalFormatada(diasOffset = 0) {
@@ -273,50 +444,50 @@ async function buscarEventosDiaTheSportsDB(dataIso) {
 
 async function carregarPartidasExternasHojeEAmanha() {
   const container = document.getElementById('lista-partidas-externas');
-  if (!container) return [];
-
   const data1 = document.getElementById('filtro-data-hoje')?.value || obterDataLocalFormatada(0);
   const data2 = document.getElementById('filtro-data-amanha')?.value || obterDataLocalFormatada(1);
 
-  container.innerHTML = `<p class="texto-vazio">⏳ Consultando partidas de <strong>${data1}</strong> e <strong>${data2}</strong> na TheSportsDB...</p>`;
+  if (container) {
+    container.innerHTML = `<p class="texto-vazio">⏳ Consultando partidas de <strong>${data1}</strong> e <strong>${data2}</strong> na TheSportsDB...</p>`;
+  }
 
   try {
-    const [eventosDia1, eventosDia2] = await Promise.all([
+    const data3 = obterDataLocalFormatada(2);
+    const data4 = obterDataLocalFormatada(3);
+    const [eventosDia1, eventosDia2, eventosDia3, eventosDia4] = await Promise.all([
       buscarEventosDiaTheSportsDB(data1),
       data2 && data2 !== data1 ? buscarEventosDiaTheSportsDB(data2) : Promise.resolve([]),
+      buscarEventosDiaTheSportsDB(data3),
+      buscarEventosDiaTheSportsDB(data4),
     ]);
 
     const mapaUnico = new Map();
-    [...eventosDia1, ...eventosDia2].forEach((ev) => {
+    [...eventosDia1, ...eventosDia2, ...eventosDia3, ...eventosDia4].forEach((ev) => {
       if (ev && ev.idEvent && ev.strHomeTeam && ev.strAwayTeam) {
         mapaUnico.set(ev.idEvent, ev);
       }
     });
 
     const lista = Array.from(mapaUnico.values());
-
-    // Prioriza partidas do Brasil e grandes ligas no topo
     lista.sort((a, b) => {
-      const aBrasil = (a.strCountry === 'Brazil' || (a.strLeague || '').includes('Brazil')) ? 0 : 1;
-      const bBrasil = (b.strCountry === 'Brazil' || (b.strLeague || '').includes('Brazil')) ? 0 : 1;
+      const aBrasil = a.strCountry === 'Brazil' || (a.strLeague || '').includes('Brazil') ? 0 : 1;
+      const bBrasil = b.strCountry === 'Brazil' || (b.strLeague || '').includes('Brazil') ? 0 : 1;
       if (aBrasil !== bBrasil) return aBrasil - bBrasil;
       return String(a.dateEvent || '').localeCompare(String(b.dateEvent || ''));
     });
 
-    partidasExternasCache = lista;
-    renderizarPartidasExternas(lista, data1);
-    return lista;
+    // Mantém as 9 partidas principais para o Mural de Partidas
+    partidasExternasCache = lista.slice(0, LIMITE_MURAL_PARTIDAS);
+    renderizarPartidasExternas(partidasExternasCache, data1);
+    return partidasExternasCache;
   } catch (erro) {
-    container.innerHTML = `<p class="texto-vazio">❌ Erro ao consultar a TheSportsDB: ${escaparHtml(erro.message)}</p>`;
+    if (container) {
+      container.innerHTML = `<p class="texto-vazio">❌ Erro ao consultar a TheSportsDB: ${escaparHtml(erro.message)}</p>`;
+    }
     return [];
   }
 }
 
-/**
- * Converte dateEvent + strTime (que na TheSportsDB vêm sempre em UTC/GMT+0)
- * para o Horário Oficial de Brasília (America/Sao_Paulo, UTC-3).
- * Exemplo: 21:30:00 UTC -> 18:30h (BRT) | 23:30:00 UTC -> 20:30h (BRT).
- */
 function converterUtcTheSportsDBParaBrasilia(ev) {
   const dataStr = (ev.dateEvent || obterDataLocalFormatada(0)).trim();
   const horaStr = (ev.strTime || '16:00:00').trim().slice(0, 8);
@@ -336,7 +507,6 @@ function converterUtcTheSportsDBParaBrasilia(ev) {
     };
   }
 
-  // Formata no fuso de Brasília (America/Sao_Paulo)
   const partes = new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo',
     year: 'numeric',
@@ -373,7 +543,7 @@ function renderizarPartidasExternas(eventos, dataHojeReferencia) {
   if (!container) return;
 
   if (!eventos || eventos.length === 0) {
-    container.innerHTML = `<p class="texto-vazio">Nenhuma partida de futebol encontrada na TheSportsDB para as datas selecionadas.</p>`;
+    container.innerHTML = `<p class="texto-vazio">Nenhuma partida encontrada na TheSportsDB para as datas selecionadas.</p>`;
     return;
   }
 
@@ -391,50 +561,32 @@ function renderizarPartidasExternas(eventos, dataHojeReferencia) {
       const { dataBr, horaBr, dataComparacao } = converterUtcTheSportsDBParaBrasilia(ev);
       const ehHoje = dataComparacao === dataHojeReferencia || ev.dateEvent === dataHojeReferencia;
       const rotuloDia = ehHoje ? 'HOJE' : 'AMANHÃ';
-
-      let badgeStatus = `<span class="badge badge-info">📅 ${rotuloDia}</span>`;
-      if (ev.strStatus === 'FT' || (temPlacar && ev.strStatus !== '1H' && ev.strStatus !== '2H')) {
-        badgeStatus = `<span class="badge badge-online">✅ Encerrada</span>`;
-      } else if (ev.strStatus === '1H' || ev.strStatus === '2H' || ev.strStatus === 'HT') {
-        badgeStatus = `<span class="badge badge-aviso">🔴 Ao Vivo (${ev.strStatus})</span>`;
-      }
-
       const escudoCasa = ev.strHomeTeamBadge || ESCUDO_PADRAO;
       const escudoFora = ev.strAwayTeamBadge || ESCUDO_PADRAO;
 
       return `
         <article class="card-partida">
           <div class="card-partida-topo">
-            <span class="liga-tag" title="${escaparHtml(ev.strLeague || 'Futebol')}">
-              🏆 ${escaparHtml(ev.strLeague || 'Futebol Internacional')}
-            </span>
-            ${badgeStatus}
+            <span class="liga-tag">🏆 ${escaparHtml(ev.strLeague || 'Futebol')}</span>
+            <span class="badge badge-info">📅 ${rotuloDia}</span>
           </div>
-
           <div class="confronto">
             <div class="time-bloco">
               <img src="${escaparHtml(escudoCasa)}" alt="${escaparHtml(ev.strHomeTeam)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
               <span class="nome-time">${escaparHtml(ev.strHomeTeam)}</span>
             </div>
-
             <div class="placar-central">
               <span class="placar-numero">${escaparHtml(placarTexto)}</span>
               <span class="versus-label">📅 ${escaparHtml(dataBr)}</span>
               <span class="horario-partida">🕒 ${escaparHtml(horaBr)}</span>
             </div>
-
             <div class="time-bloco">
               <img src="${escaparHtml(escudoFora)}" alt="${escaparHtml(ev.strAwayTeam)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
               <span class="nome-time">${escaparHtml(ev.strAwayTeam)}</span>
             </div>
           </div>
-
           <div class="card-partida-rodape">
-            <button
-              type="button"
-              class="btn btn-secundario btn-bloco btn-importar-unica"
-              data-indice="${indice}"
-            >
+            <button type="button" class="btn btn-secundario btn-bloco btn-importar-unica" data-indice="${indice}">
               ➕ Adicionar ao Mural da Arena
             </button>
           </div>
@@ -449,31 +601,24 @@ function renderizarPartidasExternas(eventos, dataHojeReferencia) {
       const ev = partidasExternasCache[idx];
       if (!ev) return;
       botao.disabled = true;
-      botao.textContent = '⏳ Importando...';
       try {
         await importarEventoExternoParaArena(ev);
-        mostrarToast(`Partida "${ev.strHomeTeam} x ${ev.strAwayTeam}" adicionada ao Mural da Arena!`);
+        mostrarToast(`Partida "${ev.strHomeTeam} x ${ev.strAwayTeam}" sincronizada no Mural!`);
         await carregarPartidasArena();
-        botao.textContent = '✅ No Mural da Arena';
+        botao.textContent = '✅ Sincronizada';
       } catch (erro) {
         mostrarToast(erro.message, 'erro');
         botao.disabled = false;
-        botao.textContent = '➕ Adicionar ao Mural da Arena';
       }
     });
   });
 }
-
-/* ==========================================================================
-   4. SINCRONIZAÇÃO / IMPORTAÇÃO DA API EXTERNA PARA O BANCO QUARKUS
-   ========================================================================== */
 
 async function garantirTimeNoBanco(nomeTime, escudoUrl, mapaTimesExistentes) {
   const chave = nomeTime.trim().toLowerCase();
   if (mapaTimesExistentes.has(chave)) {
     return mapaTimesExistentes.get(chave);
   }
-
   const criado = await requisicaoApi('/times', {
     method: 'POST',
     body: JSON.stringify({
@@ -485,17 +630,6 @@ async function garantirTimeNoBanco(nomeTime, escudoUrl, mapaTimesExistentes) {
   return criado;
 }
 
-function montarDataHoraIso(dateEvent, strTime) {
-  const dataLimpa = (dateEvent || obterDataLocalFormatada(0)).trim();
-  const horaLimpa = (strTime || '16:00:00').trim().slice(0, 8);
-  const horaFormatada = /^\d{2}:\d{2}:\d{2}$/.test(horaLimpa)
-    ? horaLimpa
-    : /^\d{2}:\d{2}$/.test(horaLimpa)
-    ? `${horaLimpa}:00`
-    : '16:00:00';
-  return `${dataLimpa}T${horaFormatada}`;
-}
-
 function eventoExternoJaFinalizado(ev) {
   const temPlacar =
     ev.intHomeScore !== null &&
@@ -504,7 +638,6 @@ function eventoExternoJaFinalizado(ev) {
     ev.intAwayScore !== null &&
     ev.intAwayScore !== undefined &&
     String(ev.intAwayScore).trim() !== '';
-
   const emAndamento = ev.strStatus === '1H' || ev.strStatus === '2H' || ev.strStatus === 'HT';
   return ev.strStatus === 'FT' || (temPlacar && !emAndamento);
 }
@@ -528,12 +661,10 @@ async function importarEventoExternoParaArena(ev, cacheContexto = null) {
     : null;
   const statusReal = jaFinalizada ? 'FINALIZADA' : 'AGENDADA';
 
-  // Verifica se já existe partida entre os mesmos times
   const partidaExistente = (partidasAtuais || []).find(
     (p) => p.timeCasa?.id === timeCasa.id && p.timeFora?.id === timeFora.id
   );
   if (partidaExistente) {
-    // Se a partida estava AGENDADA no banco mas já terminou na API externa, atualiza para FINALIZADA com o placar real
     if (jaFinalizada && partidaExistente.status !== 'FINALIZADA') {
       const atualizada = await requisicaoApi(`/partidas/${partidaExistente.id}`, {
         method: 'PUT',
@@ -569,16 +700,7 @@ async function importarEventoExternoParaArena(ev, cacheContexto = null) {
 }
 
 async function importarTodasPartidasExternas(silencioso = false) {
-  if (!partidasExternasCache || partidasExternasCache.length === 0) {
-    if (!silencioso) mostrarToast('Nenhuma partida externa carregada para importar.', 'erro');
-    return;
-  }
-
-  const btn = document.getElementById('btn-importar-todas');
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = '⏳ Importando para a Arena...';
-  }
+  if (!partidasExternasCache || partidasExternasCache.length === 0) return;
 
   try {
     const times = await requisicaoApi('/times?pagina=0&tamanho=100');
@@ -587,73 +709,25 @@ async function importarTodasPartidasExternas(silencioso = false) {
     (times || []).forEach((t) => mapaTimes.set(t.nome.trim().toLowerCase(), t));
 
     let importadas = 0;
-    for (const ev of partidasExternasCache) {
+    for (const ev of partidasExternasCache.slice(0, LIMITE_MURAL_PARTIDAS)) {
       const criada = await importarEventoExternoParaArena(ev, { times, partidas, mapaTimes });
       if (criada) importadas++;
     }
 
-    if (!silencioso) {
-      if (importadas > 0) {
-        mostrarToast(`${importadas} partida(s) de Hoje/Amanhã importada(s) para o Mural da Arena!`);
-      } else {
-        mostrarToast('Todas as partidas de Hoje/Amanhã já estão no Mural da Arena.');
-      }
+    if (!silencioso && importadas > 0) {
+      mostrarToast(`${importadas} partida(s) sincronizada(s) no Mural de Partidas!`);
     }
     await carregarPartidasArena();
   } catch (erro) {
     if (!silencioso) {
-      mostrarToast(`Não foi possível importar: ${erro.message}`, 'erro');
-    }
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = '📥 Importar Todas para a Arena';
+      mostrarToast(`Não foi possível sincronizar: ${erro.message}`, 'erro');
     }
   }
 }
 
 /* ==========================================================================
-   5. MURAL DE PARTIDAS DO BANCO (GET /partidas + POST /palpites + /apurar)
+   4. MURAL DE 9 PARTIDAS & CARD DE DESAFIO X1
    ========================================================================== */
-
-async function carregarPartidasArena() {
-  const container = document.getElementById('lista-partidas-arena');
-  if (!container) return [];
-
-  const filtroStatus = document.getElementById('filtro-status-arena')?.value || '';
-  const queryStatus = filtroStatus ? `&status=${encodeURIComponent(filtroStatus)}` : '';
-
-  try {
-    const partidas = await requisicaoApi(`/partidas?pagina=0&tamanho=100${queryStatus}`);
-    renderizarPartidasArena(partidas || []);
-    return partidas || [];
-  } catch (erro) {
-    container.innerHTML = `
-      <p class="texto-vazio">
-        ⚠️ API Quarkus offline no momento. As partidas de Hoje e Amanhã já estão visíveis acima via TheSportsDB!
-        Assim que subir a API (<code>docker compose up --build</code> ou <code>quarkusDev</code>), clique em <strong>Atualizar Mural</strong>.
-      </p>
-    `;
-    return [];
-  }
-}
-
-function formatarDataHoraBr(dataIso) {
-  if (!dataIso) return '';
-  try {
-    const d = new Date(dataIso);
-    if (Number.isNaN(d.getTime())) return dataIso;
-    return d.toLocaleString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return dataIso;
-  }
-}
 
 function extrairDataEHoraArena(dataIso) {
   if (!dataIso) return { data: '', hora: '' };
@@ -676,18 +750,72 @@ function extrairDataEHoraArena(dataIso) {
   }
 }
 
+/**
+ * Monta o Mural com 9 partidas: primeiro os jogos de Hoje/Amanhã vindos da TheSportsDB
+ * (já sincronizados no banco), depois completa com as demais partidas mais próximas da data atual.
+ */
+function selecionarPartidasDoMural(partidasBanco) {
+  const chavesExternas = new Set(
+    partidasExternasCache.map((ev) => chaveConfronto(ev.strHomeTeam, ev.strAwayTeam))
+  );
+  const porData = (a, b) => String(a.data || '').localeCompare(String(b.data || ''));
+  const destaque = partidasBanco
+    .filter((p) => chavesExternas.has(chaveConfronto(p.timeCasa?.nome, p.timeFora?.nome)))
+    .sort(porData);
+  const agora = Date.now();
+  const restantes = partidasBanco
+    .filter((p) => !chavesExternas.has(chaveConfronto(p.timeCasa?.nome, p.timeFora?.nome)))
+    .sort((a, b) => Math.abs(new Date(a.data) - agora) - Math.abs(new Date(b.data) - agora));
+  return [...destaque, ...restantes].slice(0, LIMITE_MURAL_PARTIDAS);
+}
+
+async function carregarPartidasArena() {
+  const container = document.getElementById('lista-partidas-arena');
+  if (!container) return [];
+
+  const filtroStatus = document.getElementById('filtro-status-arena')?.value || '';
+  const queryStatus = filtroStatus ? `&status=${encodeURIComponent(filtroStatus)}` : '';
+
+  try {
+    const partidas = await requisicaoApi(`/partidas?pagina=0&tamanho=100${queryStatus}`);
+    const lista9 = selecionarPartidasDoMural(partidas || []);
+    partidasArenaCache = lista9;
+    renderizarPartidasArena(lista9);
+    return lista9;
+  } catch {
+    // Se a API Quarkus estiver offline, exibe os 9 cards direto da TheSportsDB como visualização
+    if (partidasExternasCache.length > 0) {
+      const simuladas = partidasExternasCache.slice(0, LIMITE_MURAL_PARTIDAS).map((ev, i) => {
+        const { isoLocal } = converterUtcTheSportsDBParaBrasilia(ev);
+        return {
+          id: i + 1,
+          timeCasa: { nome: ev.strHomeTeam, escudoUrl: ev.strHomeTeamBadge },
+          timeFora: { nome: ev.strAwayTeam, escudoUrl: ev.strAwayTeamBadge },
+          data: isoLocal,
+          placar: ev.intHomeScore && ev.intAwayScore ? `${ev.intHomeScore}x${ev.intAwayScore}` : null,
+          status: eventoExternoJaFinalizado(ev) ? 'FINALIZADA' : 'AGENDADA',
+          somenteLeituraExterna: true,
+        };
+      });
+      partidasArenaCache = simuladas;
+      renderizarPartidasArena(simuladas);
+    } else {
+      container.innerHTML = `<p class="texto-vazio">Conecte a API Quarkus na porta 8080 para carregar as 9 partidas do Mural.</p>`;
+    }
+    return [];
+  }
+}
+
 function renderizarPartidasArena(partidas) {
   const container = document.getElementById('lista-partidas-arena');
   if (!container) return;
 
   if (!partidas || partidas.length === 0) {
-    container.innerHTML = `
-      <p class="texto-vazio">
-        Nenhuma partida cadastrada no banco com este filtro. Clique em <strong>"📥 Importar Todas para a Arena"</strong> no painel acima para trazer os jogos de Hoje e Amanhã!
-      </p>
-    `;
+    container.innerHTML = `<p class="texto-vazio">Nenhuma partida disponível no Mural com este filtro.</p>`;
     return;
   }
+
+  const admin = ehAdmin();
 
   container.innerHTML = partidas
     .map((p) => {
@@ -701,37 +829,42 @@ function renderizarPartidasArena(partidas) {
 
       const badgeStatus = finalizada
         ? `<span class="badge badge-online">✅ FINALIZADA</span>`
-        : `<span class="badge badge-aviso">⏳ AGENDADA</span>`;
+        : `<span class="badge badge-aviso">⏳ ABERTA PARA DESAFIO</span>`;
 
-      const rodapePartida = !finalizada
+      const botaoAcao = p.somenteLeituraExterna && !finalizada
+        ? `<div class="aviso-partida-encerrada">⚠️ API offline — ligue o sistema (docker compose up -d) para desafiar nesta partida</div>`
+        : !finalizada
         ? `
-          <form class="form-palpite-rapido" data-partida-id="${p.id}">
-            <div class="placar-inputs">
-              <input type="number" min="0" max="99" required placeholder="0" class="input-padrao input-gols" name="golsCasa" />
-              <span class="versus-label">x</span>
-              <input type="number" min="0" max="99" required placeholder="0" class="input-padrao input-gols" name="golsFora" />
-            </div>
-            <button type="submit" class="btn btn-primario btn-pequeno">🎯 Palpitar</button>
-          </form>
           <button
             type="button"
-            class="btn btn-grpc btn-apurar-partida"
+            class="btn btn-primario btn-bloco btn-abrir-desafio"
             data-partida-id="${p.id}"
-            data-descricao="${escaparHtml(nomeCasa)} x ${escaparHtml(nomeFora)}"
           >
-            ⚡ Apurar Resultado na API Externa (Go + gRPC)
+            ⚔️ Desafiar Usuário nesta Partida
           </button>
+          ${
+            admin
+              ? `<button
+                  type="button"
+                  class="btn btn-grpc btn-apurar-partida"
+                  data-partida-id="${p.id}"
+                  data-descricao="${escaparHtml(nomeCasa)} x ${escaparHtml(nomeFora)}"
+                >
+                  ⚡ Apurar Resultado na API Externa (Go + gRPC)
+                </button>`
+              : ''
+          }
         `
         : `
           <div class="aviso-partida-encerrada">
-            🔒 Partida encerrada — palpites fechados (Placar Oficial: <strong>${escaparHtml(placarExibicao)}</strong>)
+            🔒 Partida encerrada — Placar Oficial: <strong>${escaparHtml(placarExibicao)}</strong>
           </div>
         `;
 
       return `
-        <article class="card-partida">
+        <article class="card-partida ${!finalizada ? 'card-partida-clicavel' : ''}" data-card-partida-id="${p.id}">
           <div class="card-partida-topo">
-            <span class="liga-tag">Partida #${p.id} • 📅 ${escaparHtml(dataBr)}</span>
+            <span class="liga-tag">Jogo #${p.id} • 📅 ${escaparHtml(dataBr)}</span>
             ${badgeStatus}
           </div>
 
@@ -754,54 +887,35 @@ function renderizarPartidasArena(partidas) {
           </div>
 
           <div class="card-partida-rodape">
-            ${rodapePartida}
+            ${botaoAcao}
           </div>
         </article>
       `;
     })
     .join('');
 
-  // Eventos de envio de palpite rápido
-  container.querySelectorAll('.form-palpite-rapido').forEach((form) => {
-    form.addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const sessao = obterSessao();
-      if (!sessao || !sessao.usuarioId) {
-        mostrarToast('Faça login ou cadastre-se primeiro para registrar seu palpite!', 'erro');
-        selecionarAba('auth');
-        return;
-      }
-
-      const partidaId = Number(form.dataset.partidaId);
-      const golsCasa = form.elements.golsCasa.value.trim();
-      const golsFora = form.elements.golsFora.value.trim();
-      const placarprevisto = `${golsCasa}x${golsFora}`;
-
-      try {
-        await requisicaoApi('/palpites', {
-          method: 'POST',
-          body: JSON.stringify({
-            usuarioId: sessao.usuarioId,
-            partidaId,
-            placarprevisto,
-          }),
-        });
-        mostrarToast(`Palpite ${placarprevisto} registrado com sucesso na Partida #${partidaId}!`);
-        form.reset();
-        carregarMeusPalpites();
-      } catch (erro) {
-        mostrarToast(erro.message, 'erro');
-      }
+  // Ao clicar no botão ou no card da partida, abre o Card de Desafio X1
+  container.querySelectorAll('.btn-abrir-desafio').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      abrirModalDesafio(Number(btn.dataset.partidaId));
     });
   });
 
-  // Eventos do botão de apuração externa via Go + gRPC
+  container.querySelectorAll('.card-partida-clicavel').forEach((card) => {
+    card.addEventListener('click', (ev) => {
+      if (ev.target.closest('button')) return;
+      abrirModalDesafio(Number(card.dataset.cardPartidaId));
+    });
+  });
+
+  // Botão exclusivo do Admin para apurar via Go + gRPC
   container.querySelectorAll('.btn-apurar-partida').forEach((botao) => {
-    botao.addEventListener('click', async () => {
+    botao.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
       const partidaId = Number(botao.dataset.partidaId);
       const descricao = botao.dataset.descricao || `Partida #${partidaId}`;
       const textoOriginal = botao.textContent;
-
       botao.disabled = true;
       botao.textContent = '⏳ Consultando Go + gRPC + TheSportsDB...';
 
@@ -810,10 +924,10 @@ function renderizarPartidasArena(partidas) {
           method: 'POST',
         });
         mostrarToast(
-          `Resultado apurado para ${descricao}: ${partidaApurada.placar}! Palpites pontuados e notificações enviadas.`
+          `Resultado apurado para ${descricao}: ${partidaApurada.placar}! Desafios X1 liquidados com comissão de 5%.`
         );
+        await sincronizarDadosUsuarioLogado();
         await carregarPartidasArena();
-        await carregarMeusPalpites();
       } catch (erro) {
         mostrarToast(erro.message, 'erro');
         botao.disabled = false;
@@ -823,127 +937,412 @@ function renderizarPartidasArena(partidas) {
   });
 }
 
-/* ==========================================================================
-   5.5. ABA 3: MEUS PALPITES (GET /palpites, PUT /palpites/{id}, DELETE /palpites/{id})
-   ========================================================================== */
+async function abrirModalDesafio(partidaId) {
+  const sessao = obterSessao();
+  if (!sessao || !sessao.usuarioId) {
+    mostrarToast('Faça login primeiro para desafiar outro usuário!', 'erro');
+    selecionarAba('auth');
+    return;
+  }
 
-function atualizarResumoPalpites(palpites) {
-  const lista = Array.isArray(palpites) ? palpites : [];
-  const totalPalpites = lista.length;
-  let totalPontos = 0;
-  let cravadas = 0;
-  let pendentes = 0;
+  const partida = partidasArenaCache.find((p) => Number(p.id) === Number(partidaId));
+  if (!partida) return;
 
-  lista.forEach((palpite) => {
-    const pts = Number(palpite.pontosObtidos || 0);
-    totalPontos += pts;
-    if (pts === 3) cravadas++;
-    if (palpite.partida?.status !== 'FINALIZADA') pendentes++;
-  });
+  if (partida.somenteLeituraExterna) {
+    mostrarToast('A API está offline. Suba o sistema para criar desafios nesta partida.', 'erro');
+    return;
+  }
 
-  const elTotal = document.getElementById('stat-total-palpites');
-  const elPontos = document.getElementById('stat-total-pontos');
-  const elCravadas = document.getElementById('stat-cravadas');
-  const elPendentes = document.getElementById('stat-pendentes');
+  if (partida.status === 'FINALIZADA') {
+    mostrarToast('Esta partida já foi encerrada.', 'erro');
+    return;
+  }
 
-  if (elTotal) elTotal.textContent = String(totalPalpites);
-  if (elPontos) elPontos.textContent = `${totalPontos} pts`;
-  if (elCravadas) elCravadas.textContent = String(cravadas);
-  if (elPendentes) elPendentes.textContent = String(pendentes);
+  await sincronizarDadosUsuarioLogado();
+
+  const nomeCasa = partida.timeCasa?.nome || 'Time Mandante';
+  const nomeFora = partida.timeFora?.nome || 'Time Visitante';
+  const escudoCasa = partida.timeCasa?.escudoUrl || ESCUDO_PADRAO;
+  const escudoFora = partida.timeFora?.escudoUrl || ESCUDO_PADRAO;
+  const { data: dataBr, hora: horaBr } = extrairDataEHoraArena(partida.data);
+
+  document.getElementById('desafio-partida-id').value = String(partida.id);
+  document.getElementById('modal-desafio-titulo').textContent = `Desafiar Usuário — ${nomeCasa} x ${nomeFora}`;
+  document.getElementById('label-opcao-mandante').textContent = `🏠 Vitória ${nomeCasa}`;
+  document.getElementById('label-opcao-visitante').textContent = `✈️ Vitória ${nomeFora}`;
+
+  const saldoAtual = usuarioLogadoDados?.saldo ?? 0;
+  document.getElementById('desafio-info-saldo').innerHTML =
+    `Seu saldo disponível: <strong class="destaque-verde">${formatarMoeda(saldoAtual)}</strong>. O valor apostado ficará retido até o término da partida.`;
+
+  document.getElementById('modal-desafio-confronto').innerHTML = `
+    <div class="time-bloco">
+      <img src="${escaparHtml(escudoCasa)}" alt="${escaparHtml(nomeCasa)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+      <span class="nome-time">${escaparHtml(nomeCasa)}</span>
+    </div>
+    <div class="placar-central">
+      <span class="placar-numero">VS</span>
+      <span class="versus-label">📅 ${escaparHtml(dataBr)}</span>
+      <span class="horario-partida">🕒 ${escaparHtml(horaBr)}</span>
+    </div>
+    <div class="time-bloco">
+      <img src="${escaparHtml(escudoFora)}" alt="${escaparHtml(nomeFora)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+      <span class="nome-time">${escaparHtml(nomeFora)}</span>
+    </div>
+  `;
+
+  // Carrega lista de e-mails de outros usuários cadastrados para facilitar o preenchimento
+  try {
+    const usuarios = await requisicaoApi('/usuarios?pagina=0&tamanho=100');
+    const datalist = document.getElementById('lista-emails-sugeridos');
+    if (datalist && Array.isArray(usuarios)) {
+      datalist.innerHTML = usuarios
+        .filter((u) => Number(u.id) !== Number(sessao.usuarioId))
+        .map((u) => `<option value="${escaparHtml(u.email)}">${escaparHtml(u.nome)} (Saldo: ${formatarMoeda(u.saldo)})</option>`)
+        .join('');
+    }
+  } catch {
+    // ignora caso offline
+  }
+
+  document.getElementById('modal-desafio-overlay')?.classList.remove('oculto');
 }
 
-async function carregarMeusPalpites() {
+function fecharModalDesafio() {
+  document.getElementById('modal-desafio-overlay')?.classList.add('oculto');
+}
+
+async function enviarNovoDesafio(evento) {
+  evento.preventDefault();
+  const sessao = obterSessao();
+  if (!sessao || !sessao.usuarioId) {
+    mostrarToast('Faça login para criar um desafio.', 'erro');
+    return;
+  }
+
+  const partidaId = Number(document.getElementById('desafio-partida-id').value);
+  const emailDesafiado = document.getElementById('desafio-email-adversario').value.trim();
+  const valor = Number(document.getElementById('desafio-valor').value);
+  const radioSelecionado = document.querySelector('input[name="opcaoDesafiante"]:checked');
+
+  if (!radioSelecionado) {
+    mostrarToast('Selecione em qual resultado você está apostando!', 'erro');
+    return;
+  }
+
+  try {
+    const criado = await requisicaoApi('/desafios', {
+      method: 'POST',
+      body: JSON.stringify({
+        desafianteId: sessao.usuarioId,
+        partidaId,
+        emailDesafiado,
+        opcaoDesafiante: radioSelecionado.value,
+        valor,
+      }),
+    });
+
+    fecharModalDesafio();
+    document.getElementById('form-criar-desafio').reset();
+    await sincronizarDadosUsuarioLogado();
+    mostrarToast(
+      `Desafio X1 #${criado.id} enviado para ${emailDesafiado}! Valor de ${formatarMoeda(valor)} retido e aviso de e-mail disparado.`
+    );
+    selecionarAba('palpites');
+  } catch (erro) {
+    mostrarToast(erro.message, 'erro');
+  }
+}
+
+/* ==========================================================================
+   5. CONVITES RECEBIDOS (USUÁRIO B) E ABA "MINHAS APOSTAS"
+   ========================================================================== */
+
+async function carregarConvitesPendentes() {
+  const secao = document.getElementById('secao-convites-pendentes');
+  const container = document.getElementById('lista-convites-pendentes');
+  const sessao = obterSessao();
+
+  if (!secao || !container || !sessao || !sessao.usuarioId || !apiOnline) {
+    secao?.classList.add('oculto');
+    return;
+  }
+
+  try {
+    const desafios = await requisicaoApi(`/desafios?usuarioId=${sessao.usuarioId}&pagina=0&tamanho=50`);
+    const pendentesParaMim = (desafios || []).filter(
+      (d) => d.status === 'PENDENTE' && Number(d.desafiado?.id) === Number(sessao.usuarioId)
+    );
+
+    if (pendentesParaMim.length === 0) {
+      secao.classList.add('oculto');
+      return;
+    }
+
+    secao.classList.remove('oculto');
+    container.innerHTML = pendentesParaMim.map((d) => montarCardConviteParaAceite(d)).join('');
+    registrarEventosAceiteRecusa(container);
+  } catch {
+    secao.classList.add('oculto');
+  }
+}
+
+function montarCardConviteParaAceite(d) {
+  const partida = d.partida || {};
+  const nomeCasa = partida.timeCasa?.nome || 'Time Mandante';
+  const nomeFora = partida.timeFora?.nome || 'Time Visitante';
+  const opcaoBloqueada = d.opcaoDesafiante;
+
+  const opcoes = [
+    { codigo: 'MANDANTE', rotulo: `🏠 Vitória ${nomeCasa}` },
+    { codigo: 'EMPATE', rotulo: '🤝 Empate' },
+    { codigo: 'VISITANTE', rotulo: `✈️ Vitória ${nomeFora}` },
+  ];
+
+  const htmlOpcoes = opcoes
+    .map((op) => {
+      const bloqueada = op.codigo === opcaoBloqueada;
+      return `
+        <label class="opcao-desafio-card ${bloqueada ? 'opcao-bloqueada' : ''}">
+          <input
+            type="radio"
+            name="opcaoAceite_${d.id}"
+            value="${op.codigo}"
+            ${bloqueada ? 'disabled' : 'required'}
+          />
+          <span class="opcao-titulo">${escaparHtml(op.rotulo)}</span>
+          <small>${bloqueada ? `🔒 Escolhida por ${escaparHtml(d.desafiante?.nome)}` : 'Disponível para você'}</small>
+        </label>
+      `;
+    })
+    .join('');
+
+  return `
+    <article class="card-partida" style="border-color: var(--amarelo-aviso);">
+      <div class="card-partida-topo">
+        <span class="liga-tag">Convite #${d.id} • ${escaparHtml(nomeCasa)} x ${escaparHtml(nomeFora)}</span>
+        <span class="badge badge-aviso">💰 Aposta: ${formatarMoeda(d.valor)}</span>
+      </div>
+
+      <p style="font-size: 0.88rem; color: var(--texto);">
+        O usuário <strong>${escaparHtml(d.desafiante?.nome)}</strong> (<code>${escaparHtml(d.desafiante?.email)}</code>)
+        desafiou você apostando em <strong>${escaparHtml(traduzirOpcaoDesafio(d.opcaoDesafiante, partida))}</strong>!
+      </p>
+
+      <form class="form-aceitar-desafio" data-desafio-id="${d.id}">
+        <div class="grade-opcoes-desafio" style="margin: 8px 0;">
+          ${htmlOpcoes}
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button type="submit" class="btn btn-primario" style="flex: 1;">
+            ✅ Aceitar Desafio (Reter ${formatarMoeda(d.valor)})
+          </button>
+          <button type="button" class="btn btn-perigo btn-recusar-desafio" data-desafio-id="${d.id}">
+            ❌ Recusar
+          </button>
+        </div>
+      </form>
+    </article>
+  `;
+}
+
+function registrarEventosAceiteRecusa(container) {
+  const sessao = obterSessao();
+  if (!sessao) return;
+
+  container.querySelectorAll('.form-aceitar-desafio').forEach((form) => {
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const desafioId = Number(form.dataset.desafioId);
+      const radio = form.querySelector(`input[name="opcaoAceite_${desafioId}"]:checked`);
+      if (!radio) {
+        mostrarToast('Escolha uma das opções disponíveis para aceitar a aposta!', 'erro');
+        return;
+      }
+
+      try {
+        await requisicaoApi(`/desafios/${desafioId}/aceitar`, {
+          method: 'POST',
+          body: JSON.stringify({
+            usuarioId: sessao.usuarioId,
+            opcaoDesafiado: radio.value,
+          }),
+        });
+        mostrarToast(`Desafio #${desafioId} aceito! Os valores dos dois jogadores estão retidos até o fim da partida.`);
+        await sincronizarDadosUsuarioLogado();
+        await carregarConvitesPendentes();
+        await carregarMinhasApostas();
+      } catch (erro) {
+        mostrarToast(erro.message, 'erro');
+      }
+    });
+  });
+
+  container.querySelectorAll('.btn-recusar-desafio').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const desafioId = Number(btn.dataset.desafioId);
+      try {
+        await requisicaoApi(`/desafios/${desafioId}/recusar`, {
+          method: 'POST',
+          body: JSON.stringify({ usuarioId: sessao.usuarioId }),
+        });
+        mostrarToast(`Convite #${desafioId} recusado. O saldo retido foi devolvido ao desafiante.`);
+        await sincronizarDadosUsuarioLogado();
+        await carregarConvitesPendentes();
+        await carregarMinhasApostas();
+      } catch (erro) {
+        mostrarToast(erro.message, 'erro');
+      }
+    });
+  });
+}
+
+async function carregarMinhasApostas() {
   const container = document.getElementById('lista-meus-palpites');
   if (!container) return [];
 
-  const escopo = document.getElementById('filtro-escopo-palpites')?.value || 'meus';
   const sessao = obterSessao();
-
-  if (escopo === 'meus' && (!sessao || !sessao.usuarioId)) {
-    atualizarResumoPalpites([]);
+  if (!sessao || !sessao.usuarioId) {
     container.innerHTML = `
       <div class="texto-vazio">
-        <p style="margin-bottom: 12px;">🔐 Você ainda não está autenticado para filtrar <strong>Meus Palpites</strong>.</p>
+        <p style="margin-bottom: 12px;">🔐 Entre na sua conta para visualizar e gerenciar <strong>Minhas Apostas (Desafios X1)</strong>.</p>
         <button type="button" id="btn-ir-login-palpites" class="btn btn-primario">
           Entrar / Criar Conta Agora
         </button>
       </div>
     `;
-    document.getElementById('btn-ir-login-palpites')?.addEventListener('click', () => {
-      selecionarAba('auth');
-    });
+    document.getElementById('btn-ir-login-palpites')?.addEventListener('click', () => selecionarAba('auth'));
     return [];
   }
 
-  const queryUsuario =
-    escopo === 'meus' && sessao?.usuarioId
-      ? `&usuarioId=${encodeURIComponent(sessao.usuarioId)}`
-      : '';
+  await sincronizarDadosUsuarioLogado();
 
   try {
-    const palpites = await requisicaoApi(`/palpites?pagina=0&tamanho=100${queryUsuario}`);
-    const lista = Array.isArray(palpites) ? palpites : [];
-    atualizarResumoPalpites(lista);
-    renderizarMeusPalpites(lista);
-    return lista;
+    const query = ehAdmin() ? '' : `&usuarioId=${encodeURIComponent(sessao.usuarioId)}`;
+    const desafios = await requisicaoApi(`/desafios?pagina=0&tamanho=100${query}`);
+    const lista = Array.isArray(desafios) ? desafios : [];
+    desafiosCache = lista;
+
+    atualizarResumoFinanceiroEApostas(lista);
+
+    const filtroStatus = document.getElementById('filtro-escopo-palpites')?.value || 'todos_meus';
+    const filtrados =
+      filtroStatus === 'todos_meus' ? lista : lista.filter((d) => d.status === filtroStatus);
+
+    renderizarMinhasApostas(filtrados);
+    return filtrados;
   } catch (erro) {
-    atualizarResumoPalpites([]);
-    container.innerHTML = `
-      <p class="texto-vazio">
-        ⚠️ Não foi possível carregar os palpites (${escaparHtml(erro.message)}). Verifique se a API Quarkus está rodando na porta 8080.
-      </p>
-    `;
+    container.innerHTML = `<p class="texto-vazio">⚠️ Não foi possível carregar suas apostas (${escaparHtml(erro.message)}).</p>`;
     return [];
   }
 }
 
-function renderizarMeusPalpites(palpites) {
+function atualizarResumoFinanceiroEApostas(desafios) {
+  const sessao = obterSessao();
+  const saldoDisp = usuarioLogadoDados?.saldo ?? 0;
+  const saldoRet = usuarioLogadoDados?.saldoRetido ?? 0;
+
+  let ativos = 0;
+  let vencidos = 0;
+  (desafios || []).forEach((d) => {
+    if (d.status === 'PENDENTE' || d.status === 'ACEITO') ativos++;
+    if (d.status === 'FINALIZADO' && sessao && Number(d.vencedor?.id) === Number(sessao.usuarioId)) {
+      vencidos++;
+    }
+  });
+
+  const elDisp = document.getElementById('stat-saldo-disponivel');
+  const elRet = document.getElementById('stat-saldo-retido');
+  const elAtivos = document.getElementById('stat-desafios-ativos');
+  const elVencidos = document.getElementById('stat-desafios-vencidos');
+
+  if (elDisp) elDisp.textContent = formatarMoeda(saldoDisp);
+  if (elRet) elRet.textContent = formatarMoeda(saldoRet);
+  if (elAtivos) elAtivos.textContent = String(ativos);
+  if (elVencidos) elVencidos.textContent = String(vencidos);
+}
+
+function renderizarMinhasApostas(desafios) {
   const container = document.getElementById('lista-meus-palpites');
   if (!container) return;
 
-  if (!palpites || palpites.length === 0) {
+  if (!desafios || desafios.length === 0) {
     container.innerHTML = `
       <p class="texto-vazio">
-        🎯 Nenhum palpite encontrado. Vá na aba <strong>"🏟️ Partidas &amp; Apuração"</strong> e registre seu primeiro palpite!
+        🎯 Nenhuma aposta encontrada com este filtro. Vá em <strong>"🏟️ Mural de Partidas"</strong> e clique em uma partida para desafiar outro usuário!
       </p>
     `;
     return;
   }
 
-  container.innerHTML = palpites
-    .map((palpite) => {
-      const partida = palpite.partida || {};
-      const nomeCasa = partida.timeCasa?.nome || 'Time Casa';
-      const nomeFora = partida.timeFora?.nome || 'Time Fora';
+  const sessao = obterSessao();
+
+  container.innerHTML = desafios
+    .map((d) => {
+      const partida = d.partida || {};
+      const nomeCasa = partida.timeCasa?.nome || 'Time Mandante';
+      const nomeFora = partida.timeFora?.nome || 'Time Visitante';
       const escudoCasa = partida.timeCasa?.escudoUrl || ESCUDO_PADRAO;
       const escudoFora = partida.timeFora?.escudoUrl || ESCUDO_PADRAO;
-      const finalizada = partida.status === 'FINALIZADA';
       const { data: dataBr, hora: horaBr } = extrairDataEHoraArena(partida.data);
 
-      const placarPrevisto = palpite.placarprevisto || '0x0';
-      const [golsCasaPrev = '0', golsForaPrev = '0'] = placarPrevisto.split('x');
-      const placarOficial = partida.placar ? partida.placar.replace('x', ' x ') : 'Aguardando';
-      const pts = Number(palpite.pontosObtidos || 0);
-      const nomeTorcedor = palpite.usuario?.nome || 'Torcedor';
+      const souDesafiante = sessao && Number(d.desafiante?.id) === Number(sessao.usuarioId);
+      const souDesafiado = sessao && Number(d.desafiado?.id) === Number(sessao.usuarioId);
+      const adversario = souDesafiante ? d.desafiado : d.desafiante;
+      const minhaOpcao = souDesafiante ? d.opcaoDesafiante : d.opcaoDesafiado;
+      const opcaoAdversario = souDesafiante ? d.opcaoDesafiado : d.opcaoDesafiante;
 
-      let badgePontos = `<span class="badge badge-aviso">⏳ Aguardando Jogo</span>`;
-      if (finalizada) {
-        if (pts === 3) {
-          badgePontos = `<span class="badge badge-online">🎯 +3 pts (Placar Exato!)</span>`;
-        } else if (pts === 1) {
-          badgePontos = `<span class="badge badge-info">✅ +1 pt (Vencedor/Empate)</span>`;
+      let badgeStatus = `<span class="badge badge-aviso">⏳ PENDENTE</span>`;
+      if (d.status === 'ACEITO') {
+        badgeStatus = `<span class="badge badge-info">🔒 ACEITO (VALORES RETIDOS)</span>`;
+      } else if (d.status === 'FINALIZADO') {
+        if (!d.vencedor) {
+          badgeStatus = `<span class="badge badge-aviso">⚖️ SEM VENCEDOR (-2,5% CADA)</span>`;
+        } else if (sessao && Number(d.vencedor.id) === Number(sessao.usuarioId)) {
+          badgeStatus = `<span class="badge badge-online">🏆 VOCÊ VENCEU (+${formatarMoeda(d.premioVencedor)})</span>`;
         } else {
-          badgePontos = `<span class="badge badge-offline">❌ 0 pts</span>`;
+          badgeStatus = `<span class="badge badge-offline">❌ DERROTA (${escaparHtml(d.vencedor.nome)} venceu)</span>`;
         }
+      } else if (d.status === 'CANCELADO') {
+        badgeStatus = `<span class="badge badge-offline">🚫 CANCELADO</span>`;
+      } else if (d.status === 'RECUSADO') {
+        badgeStatus = `<span class="badge badge-offline">❌ RECUSADO</span>`;
+      } else if (d.status === 'EXPIRADO') {
+        badgeStatus = `<span class="badge badge-offline">⌛ EXPIRADO (GOL/FIM)</span>`;
+      }
+
+      // Botões de ação conforme o estado e o papel na aposta
+      let rodapeAcao = `
+        <button type="button" class="btn btn-secundario btn-pequeno btn-abrir-detalhe-aposta" data-desafio-id="${d.id}">
+          🔍 Abrir Detalhes da Aposta
+        </button>
+      `;
+
+      if (d.status === 'PENDENTE' && souDesafiante) {
+        rodapeAcao = `
+          <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-secundario btn-pequeno btn-abrir-detalhe-aposta" data-desafio-id="${d.id}" style="flex: 1;">
+              🔍 Ver Card Completo
+            </button>
+            <button type="button" class="btn btn-perigo btn-pequeno btn-cancelar-desafio" data-desafio-id="${d.id}">
+              🚫 Cancelar Convite
+            </button>
+          </div>
+        `;
+      } else if (d.status === 'PENDENTE' && souDesafiado) {
+        rodapeAcao = `
+          <button type="button" class="btn btn-primario btn-pequeno btn-abrir-detalhe-aposta" data-desafio-id="${d.id}">
+            🔔 Responder Convite (Aceitar / Recusar)
+          </button>
+        `;
       }
 
       return `
-        <article class="card-partida">
+        <article class="card-partida card-partida-clicavel" data-card-desafio-id="${d.id}">
           <div class="card-partida-topo">
-            <span class="liga-tag" title="Torcedor: ${escaparHtml(nomeTorcedor)}">
-              Palpite #${palpite.id} • 👤 ${escaparHtml(nomeTorcedor)}
-            </span>
-            ${badgePontos}
+            <span class="liga-tag">Aposta #${d.id} • 📅 ${escaparHtml(dataBr)} (${escaparHtml(horaBr)})</span>
+            ${badgeStatus}
           </div>
 
           <div class="confronto">
@@ -951,13 +1350,10 @@ function renderizarMeusPalpites(palpites) {
               <img src="${escaparHtml(escudoCasa)}" alt="${escaparHtml(nomeCasa)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
               <span class="nome-time">${escaparHtml(nomeCasa)}</span>
             </div>
-
             <div class="placar-central">
-              <span class="placar-numero">${escaparHtml(placarPrevisto.replace('x', ' x '))}</span>
-              <span class="versus-label">📅 ${escaparHtml(dataBr)}</span>
-              <span class="horario-partida">🕒 ${escaparHtml(horaBr)}</span>
+              <span class="placar-numero">${formatarMoeda(d.valor)}</span>
+              <span class="versus-label">${partida.placar ? `Placar: ${escaparHtml(partida.placar)}` : 'Valor da Aposta'}</span>
             </div>
-
             <div class="time-bloco">
               <img src="${escaparHtml(escudoFora)}" alt="${escaparHtml(nomeFora)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
               <span class="nome-time">${escaparHtml(nomeFora)}</span>
@@ -966,109 +1362,146 @@ function renderizarMeusPalpites(palpites) {
 
           <div class="comparativo-placares">
             <div class="caixa-placar-info">
-              <span>🎯 Seu Palpite</span>
-              <strong class="destaque-azul">${escaparHtml(placarPrevisto.replace('x', ' x '))}</strong>
+              <span>👤 Sua Escolha</span>
+              <strong class="destaque-verde" style="font-size: 0.92rem;">${escaparHtml(traduzirOpcaoDesafio(minhaOpcao, partida))}</strong>
             </div>
             <div class="caixa-placar-info">
-              <span>🏟️ Placar Oficial</span>
-              <strong class="${finalizada ? 'destaque-verde' : ''}">${escaparHtml(placarOficial)}</strong>
+              <span>⚔️ Adversário: ${escaparHtml(adversario?.nome || 'Usuário')}</span>
+              <strong class="destaque-azul" style="font-size: 0.92rem;">${escaparHtml(traduzirOpcaoDesafio(opcaoAdversario, partida))}</strong>
             </div>
           </div>
 
           <div class="card-partida-rodape">
-            ${
-              !finalizada
-                ? `
-            <form class="acoes-palpite-card form-editar-palpite" data-palpite-id="${palpite.id}">
-              <div class="placar-inputs">
-                <input
-                  type="number"
-                  min="0"
-                  max="99"
-                  required
-                  value="${escaparHtml(golsCasaPrev)}"
-                  class="input-padrao input-gols"
-                  name="golsCasa"
-                />
-                <span class="versus-label">x</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="99"
-                  required
-                  value="${escaparHtml(golsForaPrev)}"
-                  class="input-padrao input-gols"
-                  name="golsFora"
-                />
-              </div>
-              <div style="display: flex; gap: 6px;">
-                <button type="submit" class="btn btn-info btn-pequeno" title="Atualizar placar previsto (PUT /palpites/${palpite.id})">
-                  💾 Salvar
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-perigo btn-pequeno btn-excluir-palpite"
-                  data-palpite-id="${palpite.id}"
-                  title="Remover palpite (DELETE /palpites/${palpite.id})"
-                >
-                  🗑️ Excluir
-                </button>
-              </div>
-            </form>`
-                : `
-            <div class="aviso-partida-encerrada">
-              🔒 Partida finalizada — palpite consolidado (${pts} ${pts === 1 ? 'ponto' : 'pontos'})
-            </div>`
-            }
+            ${rodapeAcao}
           </div>
         </article>
       `;
     })
     .join('');
 
-  // Eventos de atualização de palpite (PUT /palpites/{id})
-  container.querySelectorAll('.form-editar-palpite').forEach((form) => {
-    form.addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const palpiteId = Number(form.dataset.palpiteId);
-      const golsCasa = form.elements.golsCasa.value.trim();
-      const golsFora = form.elements.golsFora.value.trim();
-      const placarprevisto = `${golsCasa}x${golsFora}`;
-
-      try {
-        await requisicaoApi(`/palpites/${palpiteId}`, {
-          method: 'PUT',
-          body: JSON.stringify({ placarprevisto }),
-        });
-        mostrarToast(`Palpite #${palpiteId} atualizado para ${placarprevisto}!`);
-        await carregarMeusPalpites();
-      } catch (erro) {
-        mostrarToast(erro.message, 'erro');
-      }
+  // Ao clicar no card ou no botão de detalhes, abre o Modal com todos os dados da aposta
+  container.querySelectorAll('[data-card-desafio-id]').forEach((card) => {
+    card.addEventListener('click', (ev) => {
+      if (ev.target.closest('.btn-cancelar-desafio')) return;
+      abrirModalDetalheAposta(Number(card.dataset.cardDesafioId));
     });
   });
 
-  // Eventos de exclusão de palpite (DELETE /palpites/{id})
-  container.querySelectorAll('.btn-excluir-palpite').forEach((botao) => {
-    botao.addEventListener('click', async () => {
-      const palpiteId = Number(botao.dataset.palpiteId);
-      botao.disabled = true;
+  // Cancelamento do convite pelo Usuário A (somente antes de B aceitar)
+  container.querySelectorAll('.btn-cancelar-desafio').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const desafioId = Number(btn.dataset.desafioId);
+      btn.disabled = true;
       try {
-        await requisicaoApi(`/palpites/${palpiteId}`, {
-          method: 'DELETE',
+        await requisicaoApi(`/desafios/${desafioId}/cancelar`, {
+          method: 'POST',
+          body: JSON.stringify({ usuarioId: sessao.usuarioId }),
         });
-        mostrarToast(`Palpite #${palpiteId} removido com sucesso!`);
-        await carregarMeusPalpites();
+        mostrarToast(`Convite #${desafioId} cancelado! O valor retido voltou para o seu saldo disponível.`);
+        await carregarMinhasApostas();
       } catch (erro) {
         mostrarToast(erro.message, 'erro');
-        botao.disabled = false;
+        btn.disabled = false;
       }
     });
   });
 }
 
+function abrirModalDetalheAposta(desafioId) {
+  const d = desafiosCache.find((item) => Number(item.id) === Number(desafioId));
+  if (!d) return;
+
+  const sessao = obterSessao();
+  const partida = d.partida || {};
+  const nomeCasa = partida.timeCasa?.nome || 'Time Mandante';
+  const nomeFora = partida.timeFora?.nome || 'Time Visitante';
+  const souDesafiante = sessao && Number(d.desafiante?.id) === Number(sessao.usuarioId);
+  const souDesafiado = sessao && Number(d.desafiado?.id) === Number(sessao.usuarioId);
+
+  document.getElementById('detalhe-aposta-badge').textContent = `APOSTA X1 #${d.id} • ${d.status}`;
+  document.getElementById('detalhe-aposta-titulo').textContent = `${nomeCasa} x ${nomeFora}`;
+
+  const comissaoEstimada = Number(d.valor || 0) * 0.05;
+  const premioEstimado = Number(d.valor || 0) * 2 - comissaoEstimada;
+
+  let blocoAcoes = '';
+  if (d.status === 'PENDENTE' && souDesafiante) {
+    blocoAcoes = `
+      <button type="button" id="btn-modal-cancelar-convite" class="btn btn-perigo btn-bloco" data-desafio-id="${d.id}">
+        🚫 Cancelar Meu Convite e Receber ${formatarMoeda(d.valor)} de Volta
+      </button>
+    `;
+  } else if (d.status === 'PENDENTE' && souDesafiado) {
+    blocoAcoes = montarCardConviteParaAceite(d);
+  }
+
+  const corpo = document.getElementById('detalhe-aposta-corpo');
+  corpo.innerHTML = `
+    <div class="bloco-detalhe-x1">
+      <div class="linha-detalhe-x1">
+        <span>👤 Desafiante (Usuário A)</span>
+        <strong>${escaparHtml(d.desafiante?.nome)} (${escaparHtml(d.desafiante?.email)})</strong>
+      </div>
+      <div class="linha-detalhe-x1">
+        <span>🎯 Opção do Desafiante (A)</span>
+        <strong class="destaque-verde">${escaparHtml(traduzirOpcaoDesafio(d.opcaoDesafiante, partida))}</strong>
+      </div>
+      <div class="linha-detalhe-x1">
+        <span>⚔️ Desafiado (Usuário B)</span>
+        <strong>${escaparHtml(d.desafiado?.nome)} (${escaparHtml(d.desafiado?.email)})</strong>
+      </div>
+      <div class="linha-detalhe-x1">
+        <span>🎯 Opção do Desafiado (B)</span>
+        <strong class="destaque-azul">${escaparHtml(traduzirOpcaoDesafio(d.opcaoDesafiado, partida))}</strong>
+      </div>
+    </div>
+
+    <div class="bloco-detalhe-x1">
+      <div class="linha-detalhe-x1">
+        <span>💰 Valor Apostado por Jogador</span>
+        <strong>${formatarMoeda(d.valor)}</strong>
+      </div>
+      <div class="linha-detalhe-x1">
+        <span>🏦 Comissão da Plataforma (5%)</span>
+        <strong class="destaque-amarelo">${formatarMoeda(d.status === 'FINALIZADO' ? d.comissaoCasa : comissaoEstimada)}</strong>
+      </div>
+      <div class="linha-detalhe-x1">
+        <span>🏆 Retorno Total ao Vencedor (Seu valor + 95% do adversário)</span>
+        <strong class="destaque-verde">${formatarMoeda(d.status === 'FINALIZADO' ? d.premioVencedor : premioEstimado)}</strong>
+      </div>
+      <div class="linha-detalhe-x1">
+        <span>🏟️ Status da Partida / Placar Oficial</span>
+        <strong>${escaparHtml(partida.status || 'AGENDADA')} ${partida.placar ? `(${escaparHtml(partida.placar)})` : ''}</strong>
+      </div>
+    </div>
+
+    ${blocoAcoes}
+  `;
+
+  if (d.status === 'PENDENTE' && souDesafiado) {
+    registrarEventosAceiteRecusa(corpo);
+  }
+
+  document.getElementById('btn-modal-cancelar-convite')?.addEventListener('click', async () => {
+    try {
+      await requisicaoApi(`/desafios/${d.id}/cancelar`, {
+        method: 'POST',
+        body: JSON.stringify({ usuarioId: sessao.usuarioId }),
+      });
+      document.getElementById('modal-detalhe-aposta-overlay')?.classList.add('oculto');
+      mostrarToast(`Convite #${d.id} cancelado e saldo devolvido!`);
+      await carregarMinhasApostas();
+    } catch (erro) {
+      mostrarToast(erro.message, 'erro');
+    }
+  });
+
+  document.getElementById('modal-detalhe-aposta-overlay')?.classList.remove('oculto');
+}
+
 /* ==========================================================================
-   5.6. ABA 4: RANKING DE TORCEDORES (GET /usuarios/ranking)
+   6. RANKING DE USUÁRIOS (ABA 4) E PAINEL ADMINISTRATIVO (ABA 5)
    ========================================================================== */
 
 async function carregarRanking() {
@@ -1080,13 +1513,7 @@ async function carregarRanking() {
     const lista = Array.isArray(usuarios) ? usuarios : [];
 
     if (lista.length === 0) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="4" class="texto-vazio">
-            Nenhum torcedor cadastrado ainda. Crie uma conta na aba <strong>"🔐 Entrar / Cadastrar"</strong>!
-          </td>
-        </tr>
-      `;
+      tbody.innerHTML = `<tr><td colspan="4" class="texto-vazio">Nenhum usuário cadastrado.</td></tr>`;
       return [];
     }
 
@@ -1099,15 +1526,17 @@ async function carregarRanking() {
         const ehUsuarioAtual = sessao && Number(sessao.usuarioId) === Number(u.id);
         const classeLinha = ehUsuarioAtual ? 'linha-usuario-atual' : '';
         const tagVoce = ehUsuarioAtual ? ' <span class="badge badge-online">Você</span>' : '';
-        const pts = Number(u.pontuacaoTotal || 0);
 
         return `
           <tr class="${classeLinha}">
             <td><strong>${posicao}</strong></td>
             <td><strong>${escaparHtml(u.nome)}</strong>${tagVoce}</td>
-            <td>${escaparHtml(u.email)}</td>
+            <td><code>${escaparHtml(u.email)}</code></td>
             <td class="col-direita">
-              <span class="pontos-pill">${pts} ${pts === 1 ? 'ponto' : 'pontos'}</span>
+              <span class="pontos-pill">${Number(u.pontuacaoTotal || 0)} pts</span>
+            </td>
+            <td class="col-direita">
+              <span class="pontos-pill">${formatarMoeda(u.saldo)}</span>
             </td>
           </tr>
         `;
@@ -1116,255 +1545,260 @@ async function carregarRanking() {
 
     return lista;
   } catch (erro) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="4" class="texto-vazio">
-          ⚠️ Erro ao carregar ranking (${escaparHtml(erro.message)}). Verifique se a API Quarkus está rodando.
-        </td>
-      </tr>
-    `;
+    tbody.innerHTML = `<tr><td colspan="4" class="texto-vazio">⚠️ Erro ao carregar usuários (${escaparHtml(erro.message)}).</td></tr>`;
     return [];
   }
 }
 
-/* ==========================================================================
-   5.7. ABA 5: PAINEL ADMINISTRATIVO (Times e Partidas)
-   ========================================================================== */
-
-function atualizarAvisoPermissaoAdmin() {
-  const banner = document.getElementById('aviso-permissao-admin');
-  if (!banner) return;
-
-  const sessao = obterSessao();
-  if (sessao && sessao.papel === 'ADMIN') {
-    banner.innerHTML = `
-      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-        <div>
-          <h2>✅ Modo Administrador Ativo (${escaparHtml(sessao.nome)})</h2>
-          <p>Você está autenticado com perfil <strong>ADMIN</strong> e possui acesso completo ao gerenciamento manual de clubes e partidas.</p>
-        </div>
-        <span class="badge badge-info">PERFIL ADMIN</span>
-      </div>
-    `;
-  } else {
-    banner.innerHTML = `
-      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
-        <div>
-          <h2>ℹ️ Dica de Perfil Administrador</h2>
-          <p>Para testar o fluxo com perfil <strong>ADMIN</strong>, entre com um e-mail iniciado por <code>admin@</code> (ex.: <code>admin@arenapro.com</code>). Os endpoints abaixo também estão liberados para seus testes locais.</p>
-        </div>
-        <button type="button" id="btn-ir-auth-admin" class="btn btn-secundario btn-pequeno">
-          Ir para Login / Cadastro
-        </button>
-      </div>
-    `;
-    document.getElementById('btn-ir-auth-admin')?.addEventListener('click', () => selecionarAba('auth'));
-  }
-}
-
 async function carregarPainelAdmin() {
-  atualizarAvisoPermissaoAdmin();
+  const banner = document.getElementById('aviso-permissao-admin');
+  const sessao = obterSessao();
+  if (banner) {
+    banner.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <h2>🛡️ Painel do Administrador (${escaparHtml(sessao?.nome || 'Admin')})</h2>
+          <p>Gerencie a <strong>Carteira Casa</strong> (comissões de 5%), credite saldo fictício nos clientes e finalize partidas para liquidar apostas X1.</p>
+        </div>
+        <span class="badge badge-info">ADMIN: ${escaparHtml(sessao?.email || 'admin@arenapro.com')}</span>
+      </div>
+    `;
+  }
 
   const selectCasa = document.getElementById('partida-casa');
   const selectFora = document.getElementById('partida-fora');
+  const selectUsuarioCredito = document.getElementById('credito-usuario-select');
+  const tbodyUsuarios = document.getElementById('corpo-tabela-usuarios-admin');
   const containerTimes = document.getElementById('lista-times-admin');
   const containerPartidas = document.getElementById('lista-partidas-admin');
 
-  // Preenche data/hora padrão no formulário de nova partida se estiver vazio
   const inputData = document.getElementById('partida-data');
   if (inputData && !inputData.value) {
     inputData.value = `${obterDataLocalFormatada(1)}T16:00`;
   }
 
   try {
-    const [times, partidas] = await Promise.all([
+    const [carteiraCasa, usuarios, times, partidas] = await Promise.all([
+      requisicaoApi('/desafios/carteira-casa'),
+      requisicaoApi('/usuarios?pagina=0&tamanho=100'),
       requisicaoApi('/times?pagina=0&tamanho=100'),
       requisicaoApi('/partidas?pagina=0&tamanho=100'),
     ]);
 
+    const elSaldoCasa = document.getElementById('admin-saldo-casa');
+    const elTotalLiq = document.getElementById('admin-total-liquidadas');
+    if (elSaldoCasa) elSaldoCasa.textContent = formatarMoeda(carteiraCasa?.saldoTotal || 0);
+    if (elTotalLiq) elTotalLiq.textContent = String(carteiraCasa?.totalApostasLiquidadas || 0);
+
+    const listaUsuarios = Array.isArray(usuarios) ? usuarios : [];
     const listaTimes = Array.isArray(times) ? times : [];
     const listaPartidas = Array.isArray(partidas) ? partidas : [];
 
-    // Popula selects de Time da Casa e Time de Fora
-    const opcoesHtml =
-      `<option value="">Selecione um time...</option>` +
-      listaTimes
-        .map((t) => `<option value="${t.id}">${escaparHtml(t.nome)} (#${t.id})</option>`)
-        .join('');
-
-    if (selectCasa) selectCasa.innerHTML = opcoesHtml;
-    if (selectFora) selectFora.innerHTML = opcoesHtml;
-
-    // Renderiza lista de Times com botão de excluir
-    if (containerTimes) {
-      if (listaTimes.length === 0) {
-        containerTimes.innerHTML = `<p class="texto-vazio">Nenhum time cadastrado no banco.</p>`;
-      } else {
-        containerTimes.innerHTML = listaTimes
-          .map((t) => {
-            const escudo = t.escudoUrl || ESCUDO_PADRAO;
-            return `
-              <div class="card-time-admin">
-                <div class="info-time-admin">
-                  <img src="${escaparHtml(escudo)}" alt="${escaparHtml(t.nome)}" class="escudo-time" style="width:32px;height:32px;" onerror="this.src='${ESCUDO_PADRAO}'" />
-                  <span title="${escaparHtml(t.nome)}">${escaparHtml(t.nome)}</span>
-                </div>
-                <button
-                  type="button"
-                  class="btn btn-perigo btn-pequeno btn-remover-time"
-                  data-time-id="${t.id}"
-                  data-time-nome="${escaparHtml(t.nome)}"
-                  title="Remover Time (DELETE /times/${t.id})"
-                >
-                  🗑️
-                </button>
-              </div>
-            `;
-          })
+    if (selectUsuarioCredito) {
+      selectUsuarioCredito.innerHTML =
+        `<option value="">Selecione um usuário para creditar saldo...</option>` +
+        listaUsuarios
+          .map(
+            (u) =>
+              `<option value="${u.id}">${escaparHtml(u.nome)} (${escaparHtml(u.email)}) — Saldo atual: ${formatarMoeda(u.saldo)}</option>`
+          )
           .join('');
-
-        containerTimes.querySelectorAll('.btn-remover-time').forEach((btn) => {
-          btn.addEventListener('click', async () => {
-            const id = Number(btn.dataset.timeId);
-            const nome = btn.dataset.timeNome;
-            btn.disabled = true;
-            try {
-              await requisicaoApi(`/times/${id}`, { method: 'DELETE' });
-              mostrarToast(`Time "${nome}" removido com sucesso!`);
-              await carregarPainelAdmin();
-            } catch (erro) {
-              mostrarToast(erro.message, 'erro');
-              btn.disabled = false;
-            }
-          });
-        });
-      }
     }
 
-    // Renderiza lista de Partidas para encerramento manual ou exclusão
+    if (tbodyUsuarios) {
+      tbodyUsuarios.innerHTML = listaUsuarios
+        .map((u) => {
+          const isAdm = (u.email || '').toLowerCase().startsWith('admin@');
+          return `
+            <tr>
+              <td>#${u.id}</td>
+              <td><strong>${escaparHtml(u.nome)}</strong></td>
+              <td><code>${escaparHtml(u.email)}</code></td>
+              <td><span class="badge ${isAdm ? 'badge-info' : 'badge-online'}">${isAdm ? 'ADMIN' : 'CLIENTE'}</span></td>
+              <td class="col-direita"><strong class="destaque-verde">${formatarMoeda(u.saldo)}</strong></td>
+              <td class="col-direita"><strong class="destaque-amarelo">${formatarMoeda(u.saldoRetido)}</strong></td>
+            </tr>
+          `;
+        })
+        .join('');
+    }
+
+    const opcoesTimes =
+      `<option value="">Selecione um time...</option>` +
+      listaTimes.map((t) => `<option value="${t.id}">${escaparHtml(t.nome)} (#${t.id})</option>`).join('');
+    if (selectCasa) selectCasa.innerHTML = opcoesTimes;
+    if (selectFora) selectFora.innerHTML = opcoesTimes;
+
+    if (containerTimes) {
+      containerTimes.innerHTML = listaTimes
+        .map((t) => {
+          const escudo = t.escudoUrl || ESCUDO_PADRAO;
+          return `
+            <div class="card-time-admin">
+              <div class="info-time-admin">
+                <img src="${escaparHtml(escudo)}" alt="${escaparHtml(t.nome)}" class="escudo-time" style="width:32px;height:32px;" onerror="this.src='${ESCUDO_PADRAO}'" />
+                <span title="${escaparHtml(t.nome)}">${escaparHtml(t.nome)}</span>
+              </div>
+              <button type="button" class="btn btn-perigo btn-pequeno btn-remover-time" data-time-id="${t.id}" data-time-nome="${escaparHtml(t.nome)}">🗑️</button>
+            </div>
+          `;
+        })
+        .join('');
+
+      containerTimes.querySelectorAll('.btn-remover-time').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = Number(btn.dataset.timeId);
+          btn.disabled = true;
+          try {
+            await requisicaoApi(`/times/${id}`, { method: 'DELETE' });
+            mostrarToast(`Time removido com sucesso!`);
+            await carregarPainelAdmin();
+          } catch (erro) {
+            mostrarToast(erro.message, 'erro');
+            btn.disabled = false;
+          }
+        });
+      });
+    }
+
     if (containerPartidas) {
-      if (listaPartidas.length === 0) {
-        containerPartidas.innerHTML = `<p class="texto-vazio">Nenhuma partida cadastrada no banco.</p>`;
-      } else {
-        containerPartidas.innerHTML = listaPartidas
-          .map((p) => {
-            const nomeCasa = p.timeCasa?.nome || 'Time Casa';
-            const nomeFora = p.timeFora?.nome || 'Time Fora';
-            const escudoCasa = p.timeCasa?.escudoUrl || ESCUDO_PADRAO;
-            const escudoFora = p.timeFora?.escudoUrl || ESCUDO_PADRAO;
-            const finalizada = p.status === 'FINALIZADA';
-            const [golsCasaAtual = '0', golsForaAtual = '0'] = (p.placar || '0x0').split('x');
-            const { data: dataBr, hora: horaBr } = extrairDataEHoraArena(p.data);
+      containerPartidas.innerHTML = listaPartidas
+        .slice(0, 12)
+        .map((p) => {
+          const nomeCasa = p.timeCasa?.nome || 'Time Casa';
+          const nomeFora = p.timeFora?.nome || 'Time Fora';
+          const escudoCasa = p.timeCasa?.escudoUrl || ESCUDO_PADRAO;
+          const escudoFora = p.timeFora?.escudoUrl || ESCUDO_PADRAO;
+          const finalizada = p.status === 'FINALIZADA';
+          const [golsCasaAtual = '0', golsForaAtual = '0'] = (p.placar || '0x0').split('x');
+          const { data: dataBr, hora: horaBr } = extrairDataEHoraArena(p.data);
 
-            return `
-              <article class="card-partida">
-                <div class="card-partida-topo">
-                  <span class="liga-tag">Partida #${p.id} • 📅 ${escaparHtml(dataBr)} (${escaparHtml(horaBr)})</span>
-                  <span class="badge ${finalizada ? 'badge-online' : 'badge-aviso'}">${p.status}</span>
+          return `
+            <article class="card-partida">
+              <div class="card-partida-topo">
+                <span class="liga-tag">Partida #${p.id} • 📅 ${escaparHtml(dataBr)} (${escaparHtml(horaBr)})</span>
+                <span class="badge ${finalizada ? 'badge-online' : 'badge-aviso'}">${p.status}</span>
+              </div>
+
+              <div class="confronto">
+                <div class="time-bloco">
+                  <img src="${escaparHtml(escudoCasa)}" alt="${escaparHtml(nomeCasa)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+                  <span class="nome-time">${escaparHtml(nomeCasa)}</span>
                 </div>
-
-                <div class="confronto">
-                  <div class="time-bloco">
-                    <img src="${escaparHtml(escudoCasa)}" alt="${escaparHtml(nomeCasa)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
-                    <span class="nome-time">${escaparHtml(nomeCasa)}</span>
-                  </div>
-                  <div class="placar-central">
-                    <span class="placar-numero">${escaparHtml(p.placar ? p.placar.replace('x', ' x ') : 'VS')}</span>
-                    <span class="versus-label">${finalizada ? 'Finalizada' : 'Agendada'}</span>
-                  </div>
-                  <div class="time-bloco">
-                    <img src="${escaparHtml(escudoFora)}" alt="${escaparHtml(nomeFora)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
-                    <span class="nome-time">${escaparHtml(nomeFora)}</span>
-                  </div>
+                <div class="placar-central">
+                  <span class="placar-numero">${escaparHtml(p.placar ? p.placar.replace('x', ' x ') : 'VS')}</span>
+                  <span class="versus-label">${finalizada ? 'Finalizada' : 'Agendada'}</span>
                 </div>
-
-                <div class="card-partida-rodape">
-                  <form
-                    class="acoes-palpite-card form-finalizar-manual"
-                    data-partida-id="${p.id}"
-                    data-casa-id="${p.timeCasa?.id}"
-                    data-fora-id="${p.timeFora?.id}"
-                    data-iso="${escaparHtml(p.data)}"
-                  >
-                    <div class="placar-inputs">
-                      <input type="number" min="0" max="99" required value="${escaparHtml(golsCasaAtual)}" class="input-padrao input-gols" name="golsCasa" />
-                      <span class="versus-label">x</span>
-                      <input type="number" min="0" max="99" required value="${escaparHtml(golsForaAtual)}" class="input-padrao input-gols" name="golsFora" />
-                    </div>
-                    <div style="display: flex; gap: 6px;">
-                      <button type="submit" class="btn btn-primario btn-pequeno" title="Salvar placar oficial e finalizar partida (PUT /partidas/${p.id})">
-                        ✅ Finalizar
-                      </button>
-                      <button
-                        type="button"
-                        class="btn btn-perigo btn-pequeno btn-remover-partida"
-                        data-partida-id="${p.id}"
-                        title="Excluir partida (DELETE /partidas/${p.id})"
-                      >
-                        🗑️
-                      </button>
-                    </div>
-                  </form>
+                <div class="time-bloco">
+                  <img src="${escaparHtml(escudoFora)}" alt="${escaparHtml(nomeFora)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+                  <span class="nome-time">${escaparHtml(nomeFora)}</span>
                 </div>
-              </article>
-            `;
-          })
-          .join('');
+              </div>
 
-        // Eventos para finalizar partida manualmente (PUT /partidas/{id})
-        containerPartidas.querySelectorAll('.form-finalizar-manual').forEach((form) => {
-          form.addEventListener('submit', async (ev) => {
-            ev.preventDefault();
-            const id = Number(form.dataset.partidaId);
-            const timeCasaId = Number(form.dataset.casaId);
-            const timeForaId = Number(form.dataset.foraId);
-            const dataIso = form.dataset.iso;
-            const golsCasa = form.elements.golsCasa.value.trim();
-            const golsFora = form.elements.golsFora.value.trim();
-            const placar = `${golsCasa}x${golsFora}`;
+              <div class="card-partida-rodape">
+                <form
+                  class="acoes-palpite-card form-finalizar-manual"
+                  data-partida-id="${p.id}"
+                  data-casa-id="${p.timeCasa?.id}"
+                  data-fora-id="${p.timeFora?.id}"
+                  data-iso="${escaparHtml(p.data)}"
+                >
+                  <div class="placar-inputs">
+                    <input type="number" min="0" max="99" required value="${escaparHtml(golsCasaAtual)}" class="input-padrao input-gols" name="golsCasa" />
+                    <span class="versus-label">x</span>
+                    <input type="number" min="0" max="99" required value="${escaparHtml(golsForaAtual)}" class="input-padrao input-gols" name="golsFora" />
+                  </div>
+                  <div style="display: flex; gap: 6px;">
+                    <button type="submit" class="btn btn-primario btn-pequeno" title="Finalizar partida e liquidar apostas X1">
+                      ✅ Finalizar &amp; Liquidar X1
+                    </button>
+                    <button type="button" class="btn btn-perigo btn-pequeno btn-remover-partida" data-partida-id="${p.id}" title="Excluir partida">
+                      🗑️
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </article>
+          `;
+        })
+        .join('');
 
-            try {
-              await requisicaoApi(`/partidas/${id}`, {
-                method: 'PUT',
-                body: JSON.stringify({
-                  timeCasaId,
-                  timeForaId,
-                  data: dataIso,
-                  placar,
-                  status: 'FINALIZADA',
-                }),
-              });
-              mostrarToast(`Partida #${id} finalizada com placar ${placar}! Pontos calculados e notificações enviadas.`);
-              await carregarPainelAdmin();
-              await carregarPartidasArena();
-            } catch (erro) {
-              mostrarToast(erro.message, 'erro');
-            }
-          });
+      containerPartidas.querySelectorAll('.form-finalizar-manual').forEach((form) => {
+        form.addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const id = Number(form.dataset.partidaId);
+          const timeCasaId = Number(form.dataset.casaId);
+          const timeForaId = Number(form.dataset.foraId);
+          const dataIso = form.dataset.iso;
+          const golsCasa = form.elements.golsCasa.value.trim();
+          const golsFora = form.elements.golsFora.value.trim();
+          const placar = `${golsCasa}x${golsFora}`;
+
+          try {
+            await requisicaoApi(`/partidas/${id}`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                timeCasaId,
+                timeForaId,
+                data: dataIso,
+                placar,
+                status: 'FINALIZADA',
+              }),
+            });
+            mostrarToast(`Partida #${id} finalizada (${placar})! Apostas X1 liquidadas e comissão de 5% creditada na Carteira Casa.`);
+            await sincronizarDadosUsuarioLogado();
+            await carregarPainelAdmin();
+            await carregarPartidasArena();
+          } catch (erro) {
+            mostrarToast(erro.message, 'erro');
+          }
         });
+      });
 
-        // Eventos para remover partida (DELETE /partidas/{id})
-        containerPartidas.querySelectorAll('.btn-remover-partida').forEach((btn) => {
-          btn.addEventListener('click', async () => {
-            const id = Number(btn.dataset.partidaId);
-            btn.disabled = true;
-            try {
-              await requisicaoApi(`/partidas/${id}`, { method: 'DELETE' });
-              mostrarToast(`Partida #${id} removida com sucesso!`);
-              await carregarPainelAdmin();
-              await carregarPartidasArena();
-            } catch (erro) {
-              mostrarToast(erro.message, 'erro');
-              btn.disabled = false;
-            }
-          });
+      containerPartidas.querySelectorAll('.btn-remover-partida').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = Number(btn.dataset.partidaId);
+          btn.disabled = true;
+          try {
+            await requisicaoApi(`/partidas/${id}`, { method: 'DELETE' });
+            mostrarToast(`Partida #${id} removida!`);
+            await carregarPainelAdmin();
+            await carregarPartidasArena();
+          } catch (erro) {
+            mostrarToast(erro.message, 'erro');
+            btn.disabled = false;
+          }
         });
-      }
+      });
     }
   } catch (erro) {
     if (containerPartidas) {
       containerPartidas.innerHTML = `<p class="texto-vazio">⚠️ API Quarkus offline (${escaparHtml(erro.message)}).</p>`;
     }
+  }
+}
+
+async function creditarSaldoAdmin(evento) {
+  evento.preventDefault();
+  const usuarioId = Number(document.getElementById('credito-usuario-select').value);
+  const valor = Number(document.getElementById('credito-valor').value);
+  if (!usuarioId) {
+    mostrarToast('Selecione um usuário!', 'erro');
+    return;
+  }
+
+  try {
+    const atualizado = await requisicaoApi(`/usuarios/${usuarioId}/creditar-saldo`, {
+      method: 'POST',
+      body: JSON.stringify({ valor }),
+    });
+    mostrarToast(
+      `Crédito de ${formatarMoeda(valor)} adicionado para ${atualizado.nome}! Novo saldo: ${formatarMoeda(atualizado.saldo)}.`
+    );
+    await sincronizarDadosUsuarioLogado();
+    await carregarPainelAdmin();
+  } catch (erro) {
+    mostrarToast(erro.message, 'erro');
   }
 }
 
@@ -1378,7 +1812,7 @@ async function criarTimeManual(evento) {
       method: 'POST',
       body: JSON.stringify({ nome, escudoUrl }),
     });
-    mostrarToast(`Time "${criado.nome}" cadastrado com sucesso!`);
+    mostrarToast(`Time "${criado.nome}" cadastrado!`);
     document.getElementById('form-criar-time').reset();
     await carregarPainelAdmin();
   } catch (erro) {
@@ -1403,7 +1837,7 @@ async function criarPartidaManual(evento) {
         status: 'AGENDADA',
       }),
     });
-    mostrarToast(`Partida #${criada.id} criada e agendada no Mural da Arena!`);
+    mostrarToast(`Partida #${criada.id} agendada no Mural!`);
     await carregarPainelAdmin();
     await carregarPartidasArena();
   } catch (erro) {
@@ -1421,66 +1855,60 @@ function escaparHtml(texto) {
 }
 
 /* ==========================================================================
-   6. INICIALIZAÇÃO
+   7. INICIALIZAÇÃO
    ========================================================================== */
 
 document.addEventListener('DOMContentLoaded', async () => {
-  // Navegação entre abas
+  aplicarModoVisual();
+
+  // Navegação por abas
   document.querySelectorAll('.aba-btn').forEach((botao) => {
     botao.addEventListener('click', () => selecionarAba(botao.dataset.aba));
   });
 
-  // Formulários de Autenticação e Cadastro
+  // Login e Cadastro
   document.getElementById('form-login')?.addEventListener('submit', realizarLogin);
   document.getElementById('form-cadastro')?.addEventListener('submit', realizarCadastro);
 
-  // Botões da seção de Partidas Externas (TheSportsDB)
+  // Modal de Desafio X1
+  document.getElementById('btn-fechar-modal-desafio')?.addEventListener('click', fecharModalDesafio);
+  document.getElementById('btn-cancelar-modal-desafio')?.addEventListener('click', fecharModalDesafio);
+  document.getElementById('form-criar-desafio')?.addEventListener('submit', enviarNovoDesafio);
+
+  // Modal de Detalhes da Aposta
+  document.getElementById('btn-fechar-modal-detalhe')?.addEventListener('click', () => {
+    document.getElementById('modal-detalhe-aposta-overlay')?.classList.add('oculto');
+  });
+
+  // Botões da TheSportsDB (Modo Admin)
   document.getElementById('btn-hoje-amanha')?.addEventListener('click', async () => {
     preencherDatasHojeEAmanha();
     await carregarPartidasExternasHojeEAmanha();
   });
+  document.getElementById('btn-buscar-externas')?.addEventListener('click', carregarPartidasExternasHojeEAmanha);
+  document.getElementById('btn-importar-todas')?.addEventListener('click', () => importarTodasPartidasExternas(false));
 
-  document.getElementById('btn-buscar-externas')?.addEventListener('click', async () => {
-    await carregarPartidasExternasHojeEAmanha();
-  });
-
-  document.getElementById('btn-importar-todas')?.addEventListener('click', async () => {
-    await importarTodasPartidasExternas(false);
-  });
-
-  // Botões do Mural da Arena
+  // Mural de Partidas e Minhas Apostas
   document.getElementById('btn-recarregar-arena')?.addEventListener('click', carregarPartidasArena);
   document.getElementById('filtro-status-arena')?.addEventListener('change', carregarPartidasArena);
-
-  // Botões da Aba 3 — Meus Palpites
-  document.getElementById('btn-recarregar-palpites')?.addEventListener('click', carregarMeusPalpites);
-  document.getElementById('filtro-escopo-palpites')?.addEventListener('change', carregarMeusPalpites);
-
-  // Botões da Aba 4 — Ranking
+  document.getElementById('btn-recarregar-palpites')?.addEventListener('click', carregarMinhasApostas);
+  document.getElementById('filtro-escopo-palpites')?.addEventListener('change', carregarMinhasApostas);
   document.getElementById('btn-recarregar-ranking')?.addEventListener('click', carregarRanking);
 
-  // Formulários e Botões da Aba 5 — Painel Admin
+  // Painel Admin
+  document.getElementById('form-creditar-saldo')?.addEventListener('submit', creditarSaldoAdmin);
   document.getElementById('form-criar-time')?.addEventListener('submit', criarTimeManual);
   document.getElementById('form-criar-partida')?.addEventListener('submit', criarPartidaManual);
   document.getElementById('btn-recarregar-admin')?.addEventListener('click', carregarPainelAdmin);
 
-  // Inicializa cabeçalho e datas de Hoje e Amanhã
   atualizarCabecalhoUsuario();
   preencherDatasHojeEAmanha();
 
-  // 1) Carrega as partidas reais de Hoje e Amanhã da TheSportsDB imediatamente
-  const externas = await carregarPartidasExternasHojeEAmanha();
-
-  // 2) Verifica se a API Quarkus está online e carrega o Mural do Banco
+  await carregarPartidasExternasHojeEAmanha();
   const online = await verificarStatusApi();
-  if (online) {
-    await validarSessaoExistenteNoBanco();
-    const partidasNoBanco = await carregarPartidasArena();
-    // Se o banco estiver vazio, sincroniza automaticamente as partidas de Hoje e Amanhã para o Mural!
-    if (partidasNoBanco.length === 0 && externas.length > 0) {
-      await importarTodasPartidasExternas(true);
-    }
-  } else {
-    await carregarPartidasArena();
-  }
+  await carregarDadosIniciais(online);
+  appInicializado = true;
+
+  // Reverifica a API a cada 10s: se ela estiver fora do ar e voltar, o site se recupera sozinho
+  setInterval(verificarStatusApi, 10000);
 });
