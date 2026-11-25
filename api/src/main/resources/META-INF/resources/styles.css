@@ -753,3 +753,196 @@ body {
   opacity: 0;
   transform: translateY(8px);
 }
+
+/* ==========================================================================
+   COMPORTAMENTO CLIENTE vs. ADMINISTRADOR E MODO DESAFIO X1
+   ========================================================================== */
+
+.oculto {
+  display: none !important;
+}
+
+/* Quando está como Visitante ou Cliente normal, esconde elementos exclusivos do Admin */
+body[data-modo="visitante"] .apenas-admin,
+body[data-modo="cliente"] .apenas-admin {
+  display: none !important;
+}
+
+/* Quando já está logado (Cliente ou Admin), esconde a aba "Entrar / Cadastrar" */
+body[data-modo="cliente"] .apenas-visitante,
+body[data-modo="admin"] .apenas-visitante {
+  display: none !important;
+}
+
+.subtitulo-topo {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--texto-secundario);
+  font-weight: 600;
+  margin-top: -2px;
+}
+
+#info-carteira-topo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.destaque-amarelo {
+  color: var(--amarelo-aviso);
+}
+
+.painel-convites {
+  border: 2px solid var(--amarelo-aviso);
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.12), rgba(17, 24, 39, 0.96));
+}
+
+.card-partida-clicavel {
+  cursor: pointer;
+}
+
+.card-partida-clicavel:hover {
+  border-color: var(--verde-arena);
+  box-shadow: 0 10px 25px rgba(16, 185, 129, 0.18);
+}
+
+/* Modal de Desafio X1 e Detalhes da Aposta */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.82);
+  backdrop-filter: blur(5px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 60;
+}
+
+.modal-card {
+  background: var(--bg-card);
+  border: 1px solid var(--verde-arena);
+  border-radius: 14px;
+  max-width: 600px;
+  width: 100%;
+  max-height: 92vh;
+  overflow-y: auto;
+  padding: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+}
+
+.modal-topo {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.btn-fechar-modal {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--borda-clara);
+  color: var(--texto);
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.btn-fechar-modal:hover {
+  background: var(--vermelho-erro);
+  border-color: var(--vermelho-erro);
+}
+
+.dica-campo {
+  font-size: 0.78rem;
+  color: var(--texto-secundario);
+}
+
+.grade-opcoes-desafio {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 560px) {
+  .grade-opcoes-desafio {
+    grid-template-columns: 1fr;
+  }
+}
+
+.opcao-desafio-card {
+  background: var(--bg-card-interno);
+  border: 2px solid var(--borda-clara);
+  border-radius: 10px;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.opcao-desafio-card:hover {
+  border-color: var(--verde-arena);
+}
+
+.opcao-desafio-card input[type="radio"] {
+  accent-color: var(--verde-arena);
+  margin-bottom: 4px;
+}
+
+.opcao-desafio-card:has(input:checked) {
+  border-color: var(--verde-arena);
+  background: rgba(16, 185, 129, 0.14);
+}
+
+.opcao-desafio-card.opcao-bloqueada {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-style: dashed;
+}
+
+.opcao-titulo {
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: var(--texto);
+}
+
+.opcao-desafio-card small {
+  font-size: 0.73rem;
+  color: var(--texto-secundario);
+}
+
+.modal-acoes {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.bloco-detalhe-x1 {
+  background: var(--bg-card-interno);
+  border: 1px solid var(--borda-clara);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+.linha-detalhe-x1 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 0.9rem;
+}
+
+.linha-detalhe-x1:last-child {
+  border-bottom: none;
+}
+

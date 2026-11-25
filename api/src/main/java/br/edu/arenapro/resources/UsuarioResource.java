@@ -2,9 +2,11 @@ package br.edu.arenapro.resources;
 
 import br.edu.arenapro.domain.Usuario;
 import br.edu.arenapro.repository.UsuarioRepository;
+import br.edu.arenapro.resources.dto.CreditarSaldoRequest;
 import br.edu.arenapro.resources.dto.UsuarioRequest;
 import br.edu.arenapro.resources.erro.ConflitoException;
 import br.edu.arenapro.resources.erro.RecursoNaoEncontradoException;
+import br.edu.arenapro.resources.erro.RegraNegocioException;
 import jakarta.inject.Inject;
 import jakarta.transaction.Transactional;
 import jakarta.validation.Valid;
@@ -156,5 +158,31 @@ public class UsuarioResource {
         }
         usuarioRepository.flush();
         return Response.noContent().build(); // 204
+    }
+
+    // POST /usuarios/{id}/creditar-saldo → 200 OK (Ação do Administrador)
+    @POST
+    @Path("/{id}/creditar-saldo")
+    @Transactional
+    @Operation(summary = "Credita saldo fictício na conta de um usuário (ação administrativa)")
+    @APIResponse(responseCode = "200", description = "Saldo creditado com sucesso",
+            content = @Content(schema = @Schema(implementation = Usuario.class)))
+    @APIResponse(responseCode = "400", ref = "RequisicaoInvalida")
+    @APIResponse(responseCode = "404", ref = "NaoEncontrado")
+    @APIResponse(responseCode = "422", ref = "RegraNegocio")
+    @APIResponse(responseCode = "500", ref = "ErroInterno")
+    public Response creditarSaldo(
+            @Parameter(description = "Id do usuário") @PathParam("id") Long id,
+            @Valid @NotNull CreditarSaldoRequest corpo) {
+        Usuario usuario = usuarioRepository.findById(id);
+        if (usuario == null) {
+            throw new RecursoNaoEncontradoException("Usuário", id);
+        }
+        try {
+            usuario.creditarSaldo(corpo.valor());
+        } catch (IllegalArgumentException e) {
+            throw new RegraNegocioException(e.getMessage());
+        }
+        return Response.ok(usuario).build();
     }
 }
