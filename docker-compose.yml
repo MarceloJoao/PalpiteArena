@@ -52,10 +52,10 @@ services:
     environment:
       QUARKUS_HTTP_HOST: 0.0.0.0
       QUARKUS_HTTP_PORT: 8080
-      DATABASE_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-palpitearena}
+      DATABASE_URL: ${DATABASE_URL:-jdbc:postgresql://db:5432/${POSTGRES_DB:-palpitearena}}
       DATABASE_USER: ${DATABASE_USER:-postgres}
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
-      QUARKUS_DATASOURCE_JDBC_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-palpitearena}
+      QUARKUS_DATASOURCE_JDBC_URL: ${DATABASE_URL:-jdbc:postgresql://db:5432/${POSTGRES_DB:-palpitearena}}
       QUARKUS_DATASOURCE_USERNAME: ${DATABASE_USER:-postgres}
       QUARKUS_DATASOURCE_PASSWORD: ${DATABASE_PASSWORD:-postgres}
       NOTIFICACAO_HOST: notificacao
