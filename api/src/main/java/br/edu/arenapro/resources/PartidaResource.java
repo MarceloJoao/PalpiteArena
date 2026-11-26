@@ -225,6 +225,9 @@ public class PartidaResource {
                         : new CarteiraCasa();
                 for (DesafioX1 desafio : desafios) {
                     desafio.liquidarComPlacarFinal(partida.getPlacar(), carteiraCasa);
+                    if (notificador != null) {
+                        notificador.notificarResultadoDesafio(desafio);
+                    }
                 }
             } else if (OpcaoDesafio.placarTemGol(partida.getPlacar())) {
                 // Se a partida começou e qualquer time fez gol, convites PENDENTES expiram e devolvem o saldo retido
@@ -240,7 +243,13 @@ public class PartidaResource {
                     : new CarteiraCasa();
             List<Bolao> boloes = bolaoRepository.listarPorPartida(partida.getId());
             for (Bolao bolao : boloes) {
+                br.edu.arenapro.domain.StatusBolao statusAntes = bolao.getStatus();
                 bolao.apurarPontosELiquidarSeFinalizado(carteiraCasa);
+                if (notificador != null
+                        && statusAntes != br.edu.arenapro.domain.StatusBolao.FINALIZADO
+                        && bolao.getStatus() == br.edu.arenapro.domain.StatusBolao.FINALIZADO) {
+                    notificador.notificarResultadoBolao(bolao);
+                }
             }
         }
 

@@ -1,9 +1,13 @@
 package br.edu.arenapro.grpc;
 
+import br.edu.arenapro.domain.Bolao;
+import br.edu.arenapro.domain.BolaoParticipante;
 import br.edu.arenapro.domain.DesafioX1;
 import br.edu.arenapro.domain.NotificadorPalpite;
 import br.edu.arenapro.domain.Palpite;
 import br.edu.arenapro.domain.Partida;
+import br.edu.arenapro.domain.StatusBolao;
+import br.edu.arenapro.domain.StatusDesafio;
 import br.edu.arenapro.domain.Usuario;
 import br.edu.arenapro.notificacao.v1.ConsultarResultadoPartidaRequest;
 import br.edu.arenapro.notificacao.v1.ConsultarResultadoPartidaResponse;
@@ -101,6 +105,106 @@ public class NotificadorPalpiteGrpc implements NotificadorPalpite {
         } catch (StatusRuntimeException e) {
             LOG.warnf("convite do desafio %s não enviado via gRPC: %s",
                     desafio.getId(), e.getStatus().getCode());
+            return false;
+        }
+    }
+
+    @Override
+    public boolean notificarCadastroUsuario(Usuario usuario) {
+        if (usuario == null || usuario.getEmail() == null || usuario.getEmail().isBlank()) {
+            return false;
+        }
+        String nome = usuario.getNome() != null ? usuario.getNome() : "Torcedor";
+        String mensagem = String.format(
+                "CADASTRO: Olá, %s! Sua conta (%s) foi criada com sucesso na PalpiteArena com perfil %s. Acesse a plataforma para participar dos Desafios X1, Bolões e Palpites!",
+                nome, usuario.getEmail(), usuario.obterPapel());
+        return dispararMensagemGrpc(usuario.getEmail(), 0, mensagem, "CADASTRO");
+    }
+
+    @Override
+    public boolean notificarResultadoDesafio(DesafioX1 desafio) {
+        if (desafio == null || desafio.getStatus() != StatusDesafio.FINALIZADO) {
+            return false;
+        }
+        String descricaoPartida = desafio.getPartida() != null ? desafio.getPartida().getDescricao() : "Partida";
+        String placar = desafio.getPartida() != null && desafio.getPartida().getPlacar() != null
+                ? desafio.getPartida().getPlacar()
+                : "FINAL";
+        String nomeVencedor = desafio.getVencedor() != null
+                ? desafio.getVencedor().getNome()
+                : "Nenhum (Reembolso com taxa de 2,5%)";
+
+        String msg = String.format(
+                "RESULTADO DESAFIO X1: A partida %s terminou (%s). Valor apostado: R$ %s. Vencedor do Desafio X1: %s (Prêmio líquido: R$ %s).",
+                descricaoPartida, placar, desafio.getValor(), nomeVencedor, desafio.getPremioVencedor());
+
+        boolean okA = false;
+        boolean okB = false;
+        if (desafio.getDesafiante() != null && desafio.getDesafiante().getEmail() != null) {
+            okA = dispararMensagemGrpc(desafio.getDesafiante().getEmail(), 0, msg, placar);
+        }
+        if (desafio.getDesafiado() != null && desafio.getDesafiado().getEmail() != null) {
+            okB = dispararMensagemGrpc(desafio.getDesafiado().getEmail(), 0, msg, placar);
+        }
+        return okA || okB;
+    }
+
+    @Override
+    public boolean notificarConviteBolao(Bolao bolao, Usuario convidado) {
+        if (bolao == null || convidado == null || convidado.getEmail() == null || convidado.getEmail().isBlank()) {
+            return false;
+        }
+        String nomeCriador = bolao.getCriador() != null && bolao.getCriador().getNome() != null
+                ? bolao.getCriador().getNome()
+                : "Um usuário";
+        int qtdPartidas = bolao.getPartidas() != null ? bolao.getPartidas().size() : 0;
+        String msg = String.format(
+                "CONVITE BOLAO: Olá, %s! O usuário %s convidou você para o Bolão #%s (%d partida(s), valor da cota: R$ %s). Acesse a aba 'Meus Bolões' na PalpiteArena para aceitar e registrar seus placares!",
+                convidado.getNome(), nomeCriador, bolao.getId(), qtdPartidas, bolao.getValorCota());
+        return dispararMensagemGrpc(convidado.getEmail(), qtdPartidas, msg, "BOLAO");
+    }
+
+    @Override
+    public boolean notificarResultadoBolao(Bolao bolao) {
+        if (bolao == null || bolao.getStatus() != StatusBolao.FINALIZADO || bolao.getParticipantes() == null) {
+            return false;
+        }
+        String nomeVencedor = bolao.getVencedor() != null && bolao.getVencedor().getNome() != null
+                ? bolao.getVencedor().getNome()
+                : "Empate / Dividido entre os primeiros colocados";
+        boolean algumEnviado = false;
+        for (BolaoParticipante part : bolao.getParticipantes()) {
+            Usuario u = part.getUsuario();
+            if (u == null || u.getEmail() == null || u.getEmail().isBlank()) {
+                continue;
+            }
+            int pts = part.getPontosTotais() != null ? part.getPontosTotais() : 0;
+            String msg = String.format(
+                    "RESULTADO BOLAO: O Bolão #%s foi encerrado! Você somou %d ponto(s). Vencedor(a): %s | Prêmio líquido (90%% do pote): R$ %s.",
+                    bolao.getId(), pts, nomeVencedor, bolao.getPremioVencedor());
+            if (dispararMensagemGrpc(u.getEmail(), pts, msg, "BOLAO")) {
+                algumEnviado = true;
+            }
+        }
+        return algumEnviado;
+    }
+
+    private boolean dispararMensagemGrpc(String destinatario, int pontos, String descricao, String placar) {
+        try {
+            NotificarResultadoPalpiteResponse resposta = stub
+                    .withDeadlineAfter(prazo.toMillis(), TimeUnit.MILLISECONDS)
+                    .notificarResultadoPalpite(NotificarResultadoPalpiteRequest.newBuilder()
+                            .setDestinatario(destinatario)
+                            .setPontos(pontos)
+                            .setPartidaDescricao(descricao)
+                            .setPlacar(placar != null ? placar : "")
+                            .build());
+            LOG.infof("e-mail enviado via Go/gRPC para %s (id=%s, sucesso=%s)",
+                    destinatario, resposta.getNotificacaoId(), resposta.getSucesso());
+            return resposta.getSucesso();
+        } catch (StatusRuntimeException e) {
+            LOG.warnf("e-mail para %s não enviado via gRPC: %s",
+                    destinatario, e.getStatus().getCode());
             return false;
         }
     }

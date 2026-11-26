@@ -32,6 +32,10 @@ services:
       dockerfile: Dockerfile
     environment:
       PORT: "8081"
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
     ports:
       - "${NOTIFICACAO_PORT:-8081}:8081"
     healthcheck:

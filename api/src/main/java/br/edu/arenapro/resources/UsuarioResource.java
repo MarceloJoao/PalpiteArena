@@ -1,5 +1,6 @@
 package br.edu.arenapro.resources;
 
+import br.edu.arenapro.domain.NotificadorPalpite;
 import br.edu.arenapro.domain.Usuario;
 import br.edu.arenapro.repository.UsuarioRepository;
 import br.edu.arenapro.resources.dto.CreditarSaldoRequest;
@@ -38,6 +39,9 @@ public class UsuarioResource {
 
     @Inject
     UsuarioRepository usuarioRepository;
+
+    @Inject
+    NotificadorPalpite notificador;
 
     // GET /usuarios?pagina=0&tamanho=10
     @GET
@@ -106,6 +110,9 @@ public class UsuarioResource {
         usuario.setEmail(email);
         usuario.setSenha(corpo.senha());
         usuarioRepository.persist(usuario);
+        if (notificador != null) {
+            notificador.notificarCadastroUsuario(usuario);
+        }
         URI uri = uriInfo.getAbsolutePathBuilder()
                 .path(usuario.getId().toString())
                 .build();
