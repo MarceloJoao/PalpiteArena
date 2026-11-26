@@ -946,3 +946,331 @@ body[data-modo="admin"] .apenas-visitante {
   border-bottom: none;
 }
 
+/* ==========================================================================
+   FUNÇÃO BOLÃO — MENU SUSPENSO, SELEÇÃO ✅, BOTÃO AMARELO E RANKING LATERAL
+   ========================================================================== */
+
+/* Caixinha suspensa "Bolão" ao passar o mouse em Mural de Partidas */
+.aba-dropdown-container {
+  position: relative;
+  display: inline-block;
+}
+
+.submenu-mural {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  min-width: 240px;
+  background: #0f172a;
+  border: 1px solid var(--verde-arena);
+  border-radius: 0 0 10px 10px;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.65);
+  padding: 6px;
+  z-index: 50;
+}
+
+.aba-dropdown-container:hover .submenu-mural,
+.submenu-mural.aberto {
+  display: block;
+}
+
+.submenu-item-bolao {
+  width: 100%;
+  background: transparent;
+  color: var(--texto);
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.submenu-item-bolao:hover,
+.submenu-item-bolao.ativo-submenu {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+.submenu-item-bolao + .submenu-item-bolao {
+  margin-top: 4px;
+}
+
+/* Barra de aviso do Modo Seleção de Bolão no Mural */
+.aviso-modo-bolao {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: rgba(234, 179, 8, 0.14);
+  border: 1px solid #eab308;
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+  font-size: 0.9rem;
+}
+
+/* Caixinha branca no canto superior esquerdo do card da partida para marcar ✅ */
+.card-partida {
+  position: relative;
+}
+
+.caixinha-selecao-bolao {
+  width: 26px;
+  height: 26px;
+  background: #ffffff;
+  border: 2px solid #cbd5e1;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: transform 0.15s, border-color 0.15s;
+  flex-shrink: 0;
+}
+
+.caixinha-selecao-bolao.marcada {
+  border-color: #10b981;
+  transform: scale(1.06);
+}
+
+.card-partida.partida-selecionada-bolao {
+  border: 2px solid #eab308;
+  box-shadow: 0 0 0 3px rgba(234, 179, 8, 0.22);
+}
+
+/* Botão amarelo centralizado na parte inferior da tela com texto branco "Confirmar Seleção" */
+.barra-inferior-bolao {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 55;
+  display: flex;
+  justify-content: center;
+}
+
+.btn-amarelo-confirmar {
+  background: #eab308;
+  color: #ffffff;
+  border: 2px solid #facc15;
+  border-radius: 10px;
+  padding: 13px 28px;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+  transition: transform 0.15s, background 0.15s;
+}
+
+.btn-amarelo-confirmar:hover {
+  background: #ca8a04;
+  transform: translateY(-2px);
+}
+
+/* Lista de cima para baixo das partidas do bolão */
+.lista-vertical-bolao {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 440px;
+  overflow-y: auto;
+  margin-top: 14px;
+  padding-right: 4px;
+}
+
+.item-vertical-bolao {
+  background: var(--bg-card-interno);
+  border: 1px solid var(--borda-clara);
+  border-radius: 10px;
+  padding: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.item-vertical-bolao:hover,
+.item-vertical-bolao.ativo {
+  border-color: #eab308;
+  background: rgba(30, 41, 59, 0.95);
+}
+
+.caixas-placar-bolao {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--borda-clara);
+  flex-wrap: wrap;
+}
+
+.item-vertical-bolao.ativo .caixas-placar-bolao,
+.item-vertical-bolao.preenchido .caixas-placar-bolao {
+  display: flex;
+}
+
+/* Lista de convidados estilo e-mail: mostra 1 ou 2 e ao passar o mouse mostra todos */
+.convidados-hover-wrapper {
+  position: relative;
+  background: rgba(15, 23, 42, 0.65);
+  border: 1px solid var(--borda-clara);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 0.83rem;
+  cursor: pointer;
+}
+
+.convidados-resumo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.convidados-lista-completa {
+  display: none;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--borda-clara);
+  flex-direction: column;
+  gap: 4px;
+}
+
+.convidados-hover-wrapper:hover .convidados-lista-completa {
+  display: flex;
+}
+
+/* Passo 8: Tela grande da partida com combinações riscadas à esquerda e disponíveis à direita */
+.palco-grande-bolao {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr 1fr;
+  gap: 16px;
+  align-items: stretch;
+  background: rgba(15, 23, 42, 0.78);
+  border: 2px solid #eab308;
+  border-radius: 14px;
+  padding: 18px;
+  margin: 16px 0;
+}
+
+@media (max-width: 860px) {
+  .palco-grande-bolao {
+    grid-template-columns: 1fr;
+  }
+}
+
+.coluna-combinacoes {
+  background: var(--bg-card-interno);
+  border: 1px solid var(--borda-clara);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.grade-pills-placar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill-placar-riscado {
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px dashed rgba(239, 68, 68, 0.45);
+  color: #fca5a5;
+  text-decoration: line-through;
+  font-weight: 800;
+  font-size: 0.86rem;
+  padding: 5px 11px;
+  border-radius: 8px;
+  cursor: not-allowed;
+}
+
+.pill-placar-livre {
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #34d399;
+  font-weight: 800;
+  font-size: 0.86rem;
+  padding: 5px 11px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.pill-placar-livre:hover {
+  background: var(--verde-arena);
+  color: #fff;
+}
+
+.card-central-grande {
+  background: var(--bg-card);
+  border: 1px solid var(--verde-arena);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.card-central-grande .escudo-time {
+  width: 68px;
+  height: 68px;
+}
+
+.card-central-grande .nome-time {
+  font-size: 1.15rem;
+}
+
+/* Passo 10: Layout do Bolão com Partidas à Esquerda e Ranking na Lateral Direita (de cima para baixo) */
+.layout-bolao-ranking-lateral {
+  display: grid;
+  grid-template-columns: 1.75fr 1fr;
+  gap: 20px;
+  align-items: flex-start;
+  margin-top: 16px;
+}
+
+@media (max-width: 860px) {
+  .layout-bolao-ranking-lateral {
+    grid-template-columns: 1fr;
+  }
+}
+
+.lateral-direita-ranking-bolao {
+  background: var(--bg-card-interno);
+  border: 1px solid var(--verde-arena);
+  border-radius: 12px;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.item-ranking-bolao {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid var(--borda-clara);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+}
+
+

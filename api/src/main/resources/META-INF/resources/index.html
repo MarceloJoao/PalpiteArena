@@ -32,8 +32,19 @@
 
   <!-- Navegação por Abas -->
   <nav class="menu-abas">
-    <button class="aba-btn ativa" data-aba="partidas">🏟️ Mural de Partidas</button>
+    <div class="aba-dropdown-container">
+      <button class="aba-btn ativa" data-aba="partidas" id="btn-aba-mural">🏟️ Mural de Partidas ▾</button>
+      <div class="submenu-mural" id="submenu-mural-bolao">
+        <button type="button" id="btn-ativar-modo-x1" class="submenu-item-bolao ativo-submenu">
+          ⚔️ Desafio (X1)
+        </button>
+        <button type="button" id="btn-ativar-modo-bolao" class="submenu-item-bolao">
+          🎲 Bolão
+        </button>
+      </div>
+    </div>
     <button class="aba-btn" data-aba="palpites">🎯 Minhas Apostas</button>
+    <button class="aba-btn" data-aba="boloes">🎲 Meus Bolões</button>
     <button class="aba-btn" data-aba="ranking">🏆 Ranking</button>
     <button class="aba-btn apenas-visitante" data-aba="auth">🔐 Entrar / Cadastrar</button>
     <button class="aba-btn apenas-admin" data-aba="admin">⚙️ Painel Admin</button>
@@ -58,6 +69,17 @@
 
       <!-- Mural Principal: 9 Partidas buscadas na TheSportsDB e sincronizadas na Arena -->
       <div class="painel-card painel-destaque">
+        <!-- Aviso quando o Modo Seleção de Bolão estiver ativo no Mural -->
+        <div id="barra-modo-bolao" class="aviso-modo-bolao oculto">
+          <div>
+            <strong>Modo  Bolão Ativo:</strong>
+            <span>Selecione as partidas desejadas(✅)  e ao final clique em <strong>"Confirmar Seleção"</strong> na parte inferior da tela</span>
+          </div>
+          <button type="button" id="btn-sair-modo-bolao" class="btn btn-secundario btn-pequeno">
+            Sair do Modo Bolão
+          </button>
+        </div>
+
         <div class="cabecalho-secao">
           <div>
             <h2>🏟️ Mural de Partidas (9 Jogos em Destaque — TheSportsDB)</h2>
@@ -206,6 +228,34 @@
         <div id="lista-meus-palpites" class="grade-partidas">
           <p class="texto-vazio">Faça login e desafie um usuário no Mural de Partidas para acompanhar suas apostas aqui.</p>
         </div>
+      </div>
+    </section>
+
+    <!-- ABA 3.5: MEUS BOLÕES (Entre Minhas Apostas e Ranking) -->
+    <section id="aba-boloes" class="aba-conteudo">
+      <div class="painel-card painel-destaque">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>🎲 Meus Bolões (Múltiplas Partidas &amp; Ranking por Pontos)</h2>
+            <p>Gerencie os bolões que você criou ou foi convidado. Defina o valor do bolão, convide vários usuários por e-mail (passe o mouse sobre os convidados para ver todos) e acompanhe o ranking na lateral direita.</p>
+          </div>
+          <div class="acoes-secao">
+            <button id="btn-novo-bolao-atalho" class="btn btn-primario" type="button">
+              ➕ Selecionar Partidas no Mural para Novo Bolão
+            </button>
+            <button id="btn-recarregar-boloes" class="btn btn-secundario" type="button">
+              🔄 Atualizar Bolões
+            </button>
+          </div>
+        </div>
+
+        <!-- Lista de Cards dos Bolões -->
+        <div id="lista-meus-boloes" class="grade-partidas">
+          <p class="texto-vazio">Você ainda não possui bolões. Passe o mouse sobre "🏟️ Mural de Partidas" e clique em "🎲 Bolão" para selecionar partidas!</p>
+        </div>
+
+        <!-- Área Expandida do Bolão Selecionado (Aceite, Escolha Grande com Riscados/Livres ou Partidas + Ranking Lateral) -->
+        <div id="area-bolao-detalhe" class="oculto" style="margin-top: 24px;"></div>
       </div>
     </section>
 
@@ -502,6 +552,38 @@
         <button type="button" id="btn-fechar-modal-detalhe" class="btn-fechar-modal" title="Fechar">✕</button>
       </div>
       <div id="detalhe-aposta-corpo" style="margin-top: 14px;"></div>
+    </div>
+  </div>
+
+  <!-- BOTÃO AMARELO CENTRALIZADO NA PARTE INFERIOR DA TELA (Modo Seleção de Bolão no Mural) -->
+  <div id="barra-confirmar-selecao-bolao" class="barra-inferior-bolao oculto">
+    <button type="button" id="btn-confirmar-selecao-bolao" class="btn-amarelo-confirmar">
+      Confirmar Seleção
+    </button>
+  </div>
+
+  <!-- MODAL DE PARTIDAS SELECIONADAS DO BOLÃO (De cima para baixo, clicando abre as 2 caixinhas de placar) -->
+  <div id="modal-selecao-bolao-overlay" class="modal-overlay oculto">
+    <div class="modal-card" style="max-width: 680px;">
+      <div class="modal-topo">
+        <div>
+          <span class="badge badge-aviso">🎲 PARTIDAS SELECIONADAS PARA O BOLÃO</span>
+          <h2 style="margin-top: 6px;">Clique em cada partida para definir o seu placar</h2>
+          <p style="font-size: 0.85rem; color: var(--texto-secundario);">
+            Após preencher o placar de todas as partidas abaixo, o bolão irá para a aba <strong>Meus Bolões</strong> para você definir o valor e convidar os participantes.
+          </p>
+        </div>
+        <button type="button" id="btn-fechar-modal-selecao-bolao" class="btn-fechar-modal" title="Fechar">✕</button>
+      </div>
+
+      <div id="lista-vertical-selecao-bolao" class="lista-vertical-bolao"></div>
+
+      <div class="modal-acoes" style="margin-top: 16px;">
+        <button type="button" id="btn-voltar-modal-selecao-bolao" class="btn btn-secundario">Voltar ao Mural</button>
+        <button type="button" id="btn-salvar-bolao-ir-meus-boloes" class="btn-amarelo-confirmar">
+          Salvar Placares e Ir para Meus Bolões
+        </button>
+      </div>
     </div>
   </div>
 

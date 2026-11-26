@@ -52,6 +52,8 @@ let partidasArenaCache = [];
 let desafiosCache = [];
 let usuarioLogadoDados = null;
 let apiOnline = false;
+const convitesDesafioNotificadosIds = new Set();
+const convitesBolaoNotificadosIds = new Set();
 
 /* ==========================================================================
    1. SESSÃO JWT, MODO DE EXIBIÇÃO (CLIENTE vs. ADMIN) E CLIENTE HTTP
@@ -74,6 +76,8 @@ function ehAdmin() {
 }
 
 function salvarSessao(dadosLogin) {
+  convitesDesafioNotificadosIds.clear();
+  convitesBolaoNotificadosIds.clear();
   if (!dadosLogin) {
     localStorage.removeItem(CHAVE_SESSAO);
     usuarioLogadoDados = null;
@@ -169,7 +173,7 @@ function extrairErroProblemDetails(problema, statusHttp) {
   return erroComStatus(mensagem, statusHttp);
 }
 
-function mostrarToast(mensagem, tipo = 'sucesso') {
+function mostrarToast(mensagem, tipo = 'sucesso', duracaoMs = 8000) {
   const container = document.getElementById('toast-container');
   if (!container) return;
 
@@ -181,7 +185,7 @@ function mostrarToast(mensagem, tipo = 'sucesso') {
   setTimeout(() => {
     toast.classList.add('toast-saindo');
     setTimeout(() => toast.remove(), 300);
-  }, 4500);
+  }, duracaoMs);
 }
 
 function formatarMoeda(valor) {
@@ -212,10 +216,16 @@ function selecionarAba(idAba) {
   });
 
   if (idAba === 'palpites') {
+    desativarModoSelecaoBolao(false);
     carregarMinhasApostas();
+  } else if (idAba === 'boloes') {
+    desativarModoSelecaoBolao(false);
+    carregarMeusBoloes();
   } else if (idAba === 'ranking') {
+    desativarModoSelecaoBolao(false);
     carregarRanking();
   } else if (idAba === 'admin') {
+    desativarModoSelecaoBolao(false);
     carregarPainelAdmin();
   } else if (idAba === 'partidas' && apiOnline) {
     carregarPartidasArena();
@@ -256,12 +266,8 @@ async function carregarDadosIniciais(online) {
     return;
   }
   await sincronizarDadosUsuarioLogado();
-  const partidas = await carregarPartidasArena();
-  const chavesBanco = new Set(partidasArenaCache.map((p) => chaveConfronto(p.timeCasa?.nome, p.timeFora?.nome)));
-  const faltam = partidasExternasCache.some((ev) => !chavesBanco.has(chaveConfronto(ev.strHomeTeam, ev.strAwayTeam)));
-  if (faltam || partidas.length === 0) {
-    await importarTodasPartidasExternas(true);
-  }
+  await importarTodasPartidasExternas(true);
+  await carregarPartidasArena();
   await carregarConvitesPendentes();
 }
 
@@ -630,16 +636,49 @@ async function garantirTimeNoBanco(nomeTime, escudoUrl, mapaTimesExistentes) {
   return criado;
 }
 
-function eventoExternoJaFinalizado(ev) {
-  const temPlacar =
+function eventoExternoTemPlacar(ev) {
+  return (
+    ev &&
     ev.intHomeScore !== null &&
     ev.intHomeScore !== undefined &&
     String(ev.intHomeScore).trim() !== '' &&
     ev.intAwayScore !== null &&
     ev.intAwayScore !== undefined &&
-    String(ev.intAwayScore).trim() !== '';
-  const emAndamento = ev.strStatus === '1H' || ev.strStatus === '2H' || ev.strStatus === 'HT';
-  return ev.strStatus === 'FT' || (temPlacar && !emAndamento);
+    String(ev.intAwayScore).trim() !== ''
+  );
+}
+
+function eventoExternoJaFinalizado(ev) {
+  const temPlacar = eventoExternoTemPlacar(ev);
+  const emAndamento = ev.strStatus === '1H' || ev.strStatus === '2H' || ev.strStatus === 'HT' || ev.strStatus === 'LIVE';
+  return ev.strStatus === 'FT' || ev.strStatus === 'AOT' || (temPlacar && !emAndamento);
+}
+
+function obterEstadoTempoRealPartida(p) {
+  if (!p) return { placarExibicao: 'VS', aoVivo: false, finalizada: false };
+  const finalizada = p.status === 'FINALIZADA';
+
+  // Verifica se há placar ao vivo mais recente vindo da TheSportsDB em cache
+  const chave = chaveConfronto(p.timeCasa?.nome, p.timeFora?.nome);
+  const evExterno = partidasExternasCache.find(
+    (ev) => chaveConfronto(ev.strHomeTeam, ev.strAwayTeam) === chave
+  );
+
+  let placarBruto = p.placar && String(p.placar).trim() !== '' ? String(p.placar).trim() : null;
+  if (!placarBruto && eventoExternoTemPlacar(evExterno)) {
+    placarBruto = `${String(evExterno.intHomeScore).trim()}x${String(evExterno.intAwayScore).trim()}`;
+  }
+
+  const horarioJogoMs = p.data ? new Date(p.data).getTime() : NaN;
+  const jaComecouPorHorario = !Number.isNaN(horarioJogoMs) && horarioJogoMs <= Date.now();
+  const aoVivo = !finalizada && (Boolean(placarBruto) || jaComecouPorHorario);
+
+  if (!placarBruto && aoVivo) {
+    placarBruto = '0x0';
+  }
+
+  const placarExibicao = placarBruto ? placarBruto.replace('x', ' x ') : 'VS';
+  return { placarExibicao, aoVivo, finalizada, placarBruto };
 }
 
 async function importarEventoExternoParaArena(ev, cacheContexto = null) {
@@ -656,8 +695,14 @@ async function importarEventoExternoParaArena(ev, cacheContexto = null) {
 
   const { isoLocal } = converterUtcTheSportsDBParaBrasilia(ev);
   const jaFinalizada = eventoExternoJaFinalizado(ev);
-  const placarReal = jaFinalizada
+  const temPlacarParcialOuFinal = eventoExternoTemPlacar(ev);
+  const horarioMs = new Date(isoLocal).getTime();
+  const jaIniciouNoRelogio = !Number.isNaN(horarioMs) && horarioMs <= Date.now();
+
+  const placarReal = temPlacarParcialOuFinal
     ? `${String(ev.intHomeScore).trim()}x${String(ev.intAwayScore).trim()}`
+    : jaIniciouNoRelogio
+    ? '0x0'
     : null;
   const statusReal = jaFinalizada ? 'FINALIZADA' : 'AGENDADA';
 
@@ -665,7 +710,9 @@ async function importarEventoExternoParaArena(ev, cacheContexto = null) {
     (p) => p.timeCasa?.id === timeCasa.id && p.timeFora?.id === timeFora.id
   );
   if (partidaExistente) {
-    if (jaFinalizada && partidaExistente.status !== 'FINALIZADA') {
+    const mudouStatus = jaFinalizada && partidaExistente.status !== 'FINALIZADA';
+    const mudouPlacar = placarReal && partidaExistente.placar !== placarReal && partidaExistente.status !== 'FINALIZADA';
+    if (mudouStatus || mudouPlacar) {
       const atualizada = await requisicaoApi(`/partidas/${partidaExistente.id}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -673,7 +720,7 @@ async function importarEventoExternoParaArena(ev, cacheContexto = null) {
           timeForaId: timeFora.id,
           data: isoLocal,
           placar: placarReal,
-          status: 'FINALIZADA',
+          status: statusReal,
         }),
       });
       Object.assign(partidaExistente, atualizada);
@@ -823,12 +870,13 @@ function renderizarPartidasArena(partidas) {
       const nomeFora = p.timeFora?.nome || 'Time Fora';
       const escudoCasa = p.timeCasa?.escudoUrl || ESCUDO_PADRAO;
       const escudoFora = p.timeFora?.escudoUrl || ESCUDO_PADRAO;
-      const finalizada = p.status === 'FINALIZADA';
-      const placarExibicao = p.placar ? p.placar.replace('x', ' x ') : 'VS';
+      const { placarExibicao, aoVivo, finalizada } = obterEstadoTempoRealPartida(p);
       const { data: dataBr, hora: horaBr } = extrairDataEHoraArena(p.data);
 
       const badgeStatus = finalizada
         ? `<span class="badge badge-online">✅ FINALIZADA</span>`
+        : aoVivo
+        ? `<span class="badge badge-info">🔴 AO VIVO (${escaparHtml(placarExibicao)})</span>`
         : `<span class="badge badge-aviso">⏳ ABERTA PARA DESAFIO</span>`;
 
       const botaoAcao = p.somenteLeituraExterna && !finalizada
@@ -861,10 +909,19 @@ function renderizarPartidasArena(partidas) {
           </div>
         `;
 
+      const selecionadaNoBolao = modoSelecaoBolaoAtivo && partidasSelecionadasBolaoIds.has(Number(p.id));
+      const caixinhaBolaoHtml =
+        modoSelecaoBolaoAtivo && !finalizada
+          ? `<span class="caixinha-selecao-bolao ${selecionadaNoBolao ? 'marcada' : ''}" data-check-partida-id="${p.id}" title="Marcar/desmarcar partida para o Bolão">${selecionadaNoBolao ? '✅' : ''}</span>`
+          : '';
+
       return `
-        <article class="card-partida ${!finalizada ? 'card-partida-clicavel' : ''}" data-card-partida-id="${p.id}">
+        <article class="card-partida ${!finalizada ? 'card-partida-clicavel' : ''} ${selecionadaNoBolao ? 'partida-selecionada-bolao' : ''}" data-card-partida-id="${p.id}">
           <div class="card-partida-topo">
-            <span class="liga-tag">Jogo #${p.id} • 📅 ${escaparHtml(dataBr)}</span>
+            <div style="display:flex;align-items:center;gap:8px;">
+              ${caixinhaBolaoHtml}
+              <span class="liga-tag">Jogo #${p.id} • 📅 ${escaparHtml(dataBr)}</span>
+            </div>
             ${badgeStatus}
           </div>
 
@@ -894,16 +951,24 @@ function renderizarPartidasArena(partidas) {
     })
     .join('');
 
-  // Ao clicar no botão ou no card da partida, abre o Card de Desafio X1
+  // Ao clicar no botão ou no card da partida, abre o Card de Desafio X1 (ou marca ✅ se estiver no Modo Bolão)
   container.querySelectorAll('.btn-abrir-desafio').forEach((btn) => {
     btn.addEventListener('click', (ev) => {
       ev.stopPropagation();
+      if (modoSelecaoBolaoAtivo) {
+        alternarSelecaoPartidaBolao(Number(btn.dataset.partidaId));
+        return;
+      }
       abrirModalDesafio(Number(btn.dataset.partidaId));
     });
   });
 
   container.querySelectorAll('.card-partida-clicavel').forEach((card) => {
     card.addEventListener('click', (ev) => {
+      if (modoSelecaoBolaoAtivo) {
+        alternarSelecaoPartidaBolao(Number(card.dataset.cardPartidaId));
+        return;
+      }
       if (ev.target.closest('button')) return;
       abrirModalDesafio(Number(card.dataset.cardPartidaId));
     });
@@ -1046,7 +1111,9 @@ async function enviarNovoDesafio(evento) {
     document.getElementById('form-criar-desafio').reset();
     await sincronizarDadosUsuarioLogado();
     mostrarToast(
-      `Desafio X1 #${criado.id} enviado para ${emailDesafiado}! Valor de ${formatarMoeda(valor)} retido e aviso de e-mail disparado.`
+      `📨 Convite de Desafio X1 #${criado.id} enviado com sucesso para ${emailDesafiado}! Valor de ${formatarMoeda(valor)} retido.`,
+      'sucesso',
+      8000
     );
     selecionarAba('palpites');
   } catch (erro) {
@@ -1074,16 +1141,48 @@ async function carregarConvitesPendentes() {
       (d) => d.status === 'PENDENTE' && Number(d.desafiado?.id) === Number(sessao.usuarioId)
     );
 
+    pendentesParaMim.forEach((d) => {
+      if (!convitesDesafioNotificadosIds.has(Number(d.id))) {
+        convitesDesafioNotificadosIds.add(Number(d.id));
+        const jogo = `${d.partida?.timeCasa?.nome || 'Mandante'} x ${d.partida?.timeFora?.nome || 'Visitante'}`;
+        mostrarToast(
+          `🔔 Você recebeu um convite de Desafio X1 (#${d.id}) de ${d.desafiante?.nome || 'um usuário'} na partida ${jogo} (${formatarMoeda(d.valor)})!`,
+          'sucesso',
+          8000
+        );
+      }
+    });
+
     if (pendentesParaMim.length === 0) {
       secao.classList.add('oculto');
-      return;
+    } else {
+      secao.classList.remove('oculto');
+      container.innerHTML = pendentesParaMim.map((d) => montarCardConviteParaAceite(d)).join('');
+      registrarEventosAceiteRecusa(container);
     }
-
-    secao.classList.remove('oculto');
-    container.innerHTML = pendentesParaMim.map((d) => montarCardConviteParaAceite(d)).join('');
-    registrarEventosAceiteRecusa(container);
   } catch {
     secao.classList.add('oculto');
+  }
+
+  // Verifica também se o usuário convidado recebeu convite(s) de Bolão
+  try {
+    const boloes = await requisicaoApi(`/boloes?usuarioId=${encodeURIComponent(sessao.usuarioId)}`);
+    (boloes || []).forEach((b) => {
+      if (b.status !== 'ABERTO') return;
+      const minhaPart = (b.participantes || []).find(
+        (p) => Number(p.usuario?.id) === Number(sessao.usuarioId) && p.status === 'PENDENTE'
+      );
+      if (minhaPart && !convitesBolaoNotificadosIds.has(Number(b.id))) {
+        convitesBolaoNotificadosIds.add(Number(b.id));
+        mostrarToast(
+          `🔔 Você recebeu um convite para o Bolão #${b.id} enviado por ${b.criador?.nome || 'um usuário'} (Valor: ${formatarMoeda(b.valorCota)})! Acesse a aba "🎲 Meus Bolões".`,
+          'sucesso',
+          8000
+        );
+      }
+    });
+  } catch {
+    // Silencioso caso falhe na sondagem
   }
 }
 
@@ -1861,9 +1960,14 @@ function escaparHtml(texto) {
 document.addEventListener('DOMContentLoaded', async () => {
   aplicarModoVisual();
 
-  // Navegação por abas
+  // Navegação por abas (clicar direto em "🏟️ Mural de Partidas" sempre volta ao modo normal Desafio X1)
   document.querySelectorAll('.aba-btn').forEach((botao) => {
-    botao.addEventListener('click', () => selecionarAba(botao.dataset.aba));
+    botao.addEventListener('click', () => {
+      if (botao.dataset.aba === 'partidas' && modoSelecaoBolaoAtivo) {
+        desativarModoSelecaoBolao(true);
+      }
+      selecionarAba(botao.dataset.aba);
+    });
   });
 
   // Login e Cadastro
@@ -1909,6 +2013,971 @@ document.addEventListener('DOMContentLoaded', async () => {
   await carregarDadosIniciais(online);
   appInicializado = true;
 
-  // Reverifica a API a cada 10s: se ela estiver fora do ar e voltar, o site se recupera sozinho
-  setInterval(verificarStatusApi, 10000);
+  // Reverifica a API, convites recebidos (Desafio X1 e Bolão) e placares em tempo real automaticamente
+  let contadorCiclosTempoReal = 0;
+  setInterval(async () => {
+    const ok = await verificarStatusApi();
+    if (!ok) return;
+    if (obterSessao()?.usuarioId) {
+      await carregarConvitesPendentes();
+    }
+    contadorCiclosTempoReal++;
+    if (contadorCiclosTempoReal % 3 === 0) {
+      await carregarPartidasExternasHojeEAmanha();
+      await importarTodasPartidasExternas(true);
+    }
+  }, 10000);
+  inicializarEventosBolao();
 });
+
+/* ==========================================================================
+   8. FUNÇÃO BOLÃO (SELEÇÃO MÚLTIPLA ✅, PLACARES, CONVITES, RANKING E REGRAS 11-14)
+   ========================================================================== */
+
+let modoSelecaoBolaoAtivo = false;
+const partidasSelecionadasBolaoIds = new Set();
+let placaresCriadorBolaoTemp = {};
+let boloesCache = [];
+let bolaoDetalheAtualId = null;
+let partidaGrandeBolaoId = null;
+let placaresConvidadoTemp = {};
+
+const COMBINACOES_PADRAO_BOLAO = [
+  '1x0', '2x0', '2x1', '3x0', '3x1', '3x2',
+  '0x0', '1x1', '2x2',
+  '0x1', '0x2', '1x2', '0x3', '1x3', '2x3',
+];
+
+function inicializarEventosBolao() {
+  document.getElementById('btn-ativar-modo-x1')?.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    desativarModoSelecaoBolao(true);
+    selecionarAba('partidas');
+  });
+
+  document.getElementById('btn-ativar-modo-bolao')?.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    ativarModoSelecaoBolao();
+  });
+
+  document.getElementById('btn-novo-bolao-atalho')?.addEventListener('click', () => {
+    ativarModoSelecaoBolao();
+  });
+
+  document.getElementById('btn-sair-modo-bolao')?.addEventListener('click', () => {
+    desativarModoSelecaoBolao(true);
+  });
+
+  document.getElementById('btn-confirmar-selecao-bolao')?.addEventListener('click', () => {
+    abrirModalPartidasSelecionadasBolao();
+  });
+
+  document.getElementById('btn-fechar-modal-selecao-bolao')?.addEventListener('click', fecharModalSelecaoBolao);
+  document.getElementById('btn-voltar-modal-selecao-bolao')?.addEventListener('click', fecharModalSelecaoBolao);
+  document.getElementById('btn-salvar-bolao-ir-meus-boloes')?.addEventListener('click', salvarSelecaoEIrParaMeusBoloes);
+  document.getElementById('btn-recarregar-boloes')?.addEventListener('click', carregarMeusBoloes);
+}
+
+function ativarModoSelecaoBolao() {
+  const sessao = obterSessao();
+  if (!sessao || !sessao.usuarioId) {
+    mostrarToast('Faça login primeiro para criar um Bolão!', 'erro');
+    selecionarAba('auth');
+    return;
+  }
+
+  selecionarAba('partidas');
+  modoSelecaoBolaoAtivo = true;
+  partidasSelecionadasBolaoIds.clear();
+  placaresCriadorBolaoTemp = {};
+
+  document.getElementById('btn-ativar-modo-x1')?.classList.remove('ativo-submenu');
+  document.getElementById('btn-ativar-modo-bolao')?.classList.add('ativo-submenu');
+  document.getElementById('barra-modo-bolao')?.classList.remove('oculto');
+  document.getElementById('barra-confirmar-selecao-bolao')?.classList.remove('oculto');
+  renderizarPartidasArena(partidasArenaCache);
+}
+
+function desativarModoSelecaoBolao(reRenderizar = true) {
+  modoSelecaoBolaoAtivo = false;
+  partidasSelecionadasBolaoIds.clear();
+  document.getElementById('btn-ativar-modo-x1')?.classList.add('ativo-submenu');
+  document.getElementById('btn-ativar-modo-bolao')?.classList.remove('ativo-submenu');
+  document.getElementById('barra-modo-bolao')?.classList.add('oculto');
+  document.getElementById('barra-confirmar-selecao-bolao')?.classList.add('oculto');
+  if (reRenderizar) {
+    renderizarPartidasArena(partidasArenaCache);
+  }
+}
+
+function alternarSelecaoPartidaBolao(partidaId) {
+  const partida = partidasArenaCache.find((p) => Number(p.id) === Number(partidaId));
+  if (!partida || partida.status === 'FINALIZADA') return;
+
+  if (partidasSelecionadasBolaoIds.has(Number(partidaId))) {
+    partidasSelecionadasBolaoIds.delete(Number(partidaId));
+  } else {
+    partidasSelecionadasBolaoIds.add(Number(partidaId));
+  }
+  renderizarPartidasArena(partidasArenaCache);
+}
+
+function fecharModalSelecaoBolao() {
+  document.getElementById('modal-selecao-bolao-overlay')?.classList.add('oculto');
+}
+
+function abrirModalPartidasSelecionadasBolao() {
+  if (partidasSelecionadasBolaoIds.size === 0) {
+    mostrarToast('Marque ao menos uma partida com ✅ antes de clicar em Confirmar Seleção!', 'erro', 3000);
+    return;
+  }
+
+  const selecionadas = partidasArenaCache.filter((p) => partidasSelecionadasBolaoIds.has(Number(p.id)));
+  const container = document.getElementById('lista-vertical-selecao-bolao');
+  if (!container) return;
+
+  container.innerHTML = selecionadas
+    .map((p, idx) => {
+      const nomeCasa = p.timeCasa?.nome || 'Time Mandante';
+      const nomeFora = p.timeFora?.nome || 'Time Visitante';
+      const escudoCasa = p.timeCasa?.escudoUrl || ESCUDO_PADRAO;
+      const escudoFora = p.timeFora?.escudoUrl || ESCUDO_PADRAO;
+      const { data: dataBr, hora: horaBr } = extrairDataEHoraArena(p.data);
+      const salvo = placaresCriadorBolaoTemp[p.id] || '';
+      const [gCasa = '', gFora = ''] = salvo ? salvo.split('x') : ['', ''];
+
+      return `
+        <div class="item-vertical-bolao ${idx === 0 ? 'ativo' : ''} ${salvo ? 'preenchido' : ''}" data-item-bolao-partida="${p.id}">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <img src="${escaparHtml(escudoCasa)}" class="escudo-time" style="width:34px;height:34px;" onerror="this.src='${ESCUDO_PADRAO}'" />
+              <strong>${escaparHtml(nomeCasa)}</strong>
+              <span class="versus-label">x</span>
+              <strong>${escaparHtml(nomeFora)}</strong>
+              <img src="${escaparHtml(escudoFora)}" class="escudo-time" style="width:34px;height:34px;" onerror="this.src='${ESCUDO_PADRAO}'" />
+            </div>
+            <span class="badge ${salvo ? 'badge-online' : 'badge-aviso'}" id="badge-placar-criador-${p.id}">
+              ${salvo ? `✅ Seu Placar: ${salvo.replace('x', ' x ')}` : `📅 ${escaparHtml(dataBr)} (${escaparHtml(horaBr)}) • Clique para definir placar`}
+            </span>
+          </div>
+
+          <div class="caixas-placar-bolao">
+            <span style="font-size:0.84rem;font-weight:700;">${escaparHtml(nomeCasa)}</span>
+            <input
+              type="number"
+              min="0"
+              max="99"
+              placeholder="0"
+              value="${escaparHtml(gCasa)}"
+              class="input-padrao input-gols input-criador-casa"
+              data-partida-id="${p.id}"
+            />
+            <span class="versus-label">x</span>
+            <input
+              type="number"
+              min="0"
+              max="99"
+              placeholder="0"
+              value="${escaparHtml(gFora)}"
+              class="input-padrao input-gols input-criador-fora"
+              data-partida-id="${p.id}"
+            />
+            <span style="font-size:0.84rem;font-weight:700;">${escaparHtml(nomeFora)}</span>
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  // Ao clicar em uma partida da lista vertical, abre as 2 caixinhas de placar dela
+  container.querySelectorAll('.item-vertical-bolao').forEach((item) => {
+    item.addEventListener('click', (ev) => {
+      if (ev.target.tagName === 'INPUT') return;
+      container.querySelectorAll('.item-vertical-bolao').forEach((el) => el.classList.remove('ativo'));
+      item.classList.add('ativo');
+      item.querySelector('.input-criador-casa')?.focus();
+    });
+  });
+
+  // Atualiza em tempo real o placar digitado nas 2 caixinhas
+  const atualizarPlacarItem = (pid) => {
+    const item = container.querySelector(`[data-item-bolao-partida="${pid}"]`);
+    if (!item) return;
+    const valCasa = item.querySelector('.input-criador-casa')?.value.trim();
+    const valFora = item.querySelector('.input-criador-fora')?.value.trim();
+    const badge = document.getElementById(`badge-placar-criador-${pid}`);
+    if (valCasa !== '' && valFora !== '') {
+      placaresCriadorBolaoTemp[pid] = `${valCasa}x${valFora}`;
+      item.classList.add('preenchido');
+      if (badge) {
+        badge.className = 'badge badge-online';
+        badge.textContent = `✅ Seu Placar: ${valCasa} x ${valFora}`;
+      }
+    } else {
+      delete placaresCriadorBolaoTemp[pid];
+      item.classList.remove('preenchido');
+      if (badge) {
+        badge.className = 'badge badge-aviso';
+        badge.textContent = 'Preencha as 2 caixinhas de placar';
+      }
+    }
+  };
+
+  container.querySelectorAll('.input-criador-casa, .input-criador-fora').forEach((inp) => {
+    inp.addEventListener('input', () => atualizarPlacarItem(Number(inp.dataset.partidaId)));
+  });
+
+  document.getElementById('modal-selecao-bolao-overlay')?.classList.remove('oculto');
+}
+
+async function salvarSelecaoEIrParaMeusBoloes() {
+  const sessao = obterSessao();
+  if (!sessao || !sessao.usuarioId) return;
+
+  const selecionadas = partidasArenaCache.filter((p) => partidasSelecionadasBolaoIds.has(Number(p.id)));
+  const faltando = [];
+  const palpitesPayload = [];
+
+  selecionadas.forEach((p) => {
+    const placar = placaresCriadorBolaoTemp[p.id];
+    if (!placar) {
+      faltando.push(`${p.timeCasa?.nome || 'Mandante'} x ${p.timeFora?.nome || 'Visitante'}`);
+    } else {
+      palpitesPayload.push({ partidaId: p.id, placar });
+    }
+  });
+
+  if (faltando.length > 0) {
+    faltando.forEach((nomeJogo) => {
+      mostrarToast(`⚠️ Você esqueceu de marcar o placar de: ${nomeJogo}`, 'erro', 3000);
+    });
+    return;
+  }
+
+  try {
+    const criado = await requisicaoApi('/boloes', {
+      method: 'POST',
+      body: JSON.stringify({
+        criadorId: sessao.usuarioId,
+        palpites: palpitesPayload,
+      }),
+    });
+
+    fecharModalSelecaoBolao();
+    desativarModoSelecaoBolao(true);
+    bolaoDetalheAtualId = criado.id;
+    mostrarToast(`Bolão #${criado.id} criado! Agora defina o valor do bolão e convide os participantes.`);
+    selecionarAba('boloes');
+  } catch (erro) {
+    mostrarToast(erro.message, 'erro');
+  }
+}
+
+function renderizarBoxConvidadosHover(participantes) {
+  const convidados = (participantes || []).filter((p) => p.papel !== 'CRIADOR');
+  if (convidados.length === 0) {
+    return `<div class="convidados-hover-wrapper"><span>Nenhum convidado adicionado ainda (clique no bolão para convidar)</span></div>`;
+  }
+
+  const primeirosDois = convidados
+    .slice(0, 2)
+    .map((p) => `${p.usuario?.email || p.usuario?.nome} (${p.status})`)
+    .join(', ');
+  const extras = convidados.length > 2 ? ` +${convidados.length - 2} (passe o mouse para ver todos)` : '';
+
+  const todosHtml = convidados
+    .map(
+      (p) =>
+        `<div style="display:flex;justify-content:space-between;gap:8px;">
+          <span>👤 ${escaparHtml(p.usuario?.nome)} (<code>${escaparHtml(p.usuario?.email)}</code>)</span>
+          <span class="badge ${p.status === 'CONFIRMADO' || p.status === 'ACEITO' ? 'badge-online' : 'badge-aviso'}">${p.status}</span>
+        </div>`
+    )
+    .join('');
+
+  return `
+    <div class="convidados-hover-wrapper" title="Passe o mouse para ver todos os usuários convidados">
+      <div class="convidados-resumo">
+        <span>📨 <strong>Convidados (${convidados.length}):</strong> ${escaparHtml(primeirosDois)}${escaparHtml(extras)}</span>
+      </div>
+      <div class="convidados-lista-completa">
+        ${todosHtml}
+      </div>
+    </div>
+  `;
+}
+
+async function carregarMeusBoloes() {
+  const container = document.getElementById('lista-meus-boloes');
+  const areaDetalhe = document.getElementById('area-bolao-detalhe');
+  if (!container) return [];
+
+  const sessao = obterSessao();
+  if (!sessao || !sessao.usuarioId) {
+    container.innerHTML = `
+      <div class="texto-vazio">
+        <p style="margin-bottom: 12px;">🔐 Entre na sua conta para acessar <strong>Meus Bolões</strong>.</p>
+        <button type="button" id="btn-ir-login-boloes" class="btn btn-primario">Entrar / Criar Conta</button>
+      </div>
+    `;
+    document.getElementById('btn-ir-login-boloes')?.addEventListener('click', () => selecionarAba('auth'));
+    areaDetalhe?.classList.add('oculto');
+    return [];
+  }
+
+  await sincronizarDadosUsuarioLogado();
+
+  try {
+    const query = ehAdmin() ? '' : `?usuarioId=${encodeURIComponent(sessao.usuarioId)}`;
+    const lista = await requisicaoApi(`/boloes${query}`);
+    boloesCache = Array.isArray(lista) ? lista : [];
+    renderizarListaMeusBoloes(boloesCache);
+
+    if (bolaoDetalheAtualId) {
+      const existe = boloesCache.find((b) => Number(b.id) === Number(bolaoDetalheAtualId));
+      if (existe) {
+        await renderizarDetalheBolao(existe);
+      } else {
+        areaDetalhe?.classList.add('oculto');
+      }
+    }
+    return boloesCache;
+  } catch (erro) {
+    container.innerHTML = `<p class="texto-vazio">⚠️ Erro ao carregar bolões: ${escaparHtml(erro.message)}</p>`;
+    return [];
+  }
+}
+
+function renderizarListaMeusBoloes(boloes) {
+  const container = document.getElementById('lista-meus-boloes');
+  if (!container) return;
+
+  if (!boloes || boloes.length === 0) {
+    container.innerHTML = `
+      <p class="texto-vazio">
+        🎲 Nenhum bolão encontrado. Passe o mouse em <strong>"🏟️ Mural de Partidas"</strong> ➔ clique em <strong>"🎲 Bolão"</strong> para selecionar as partidas!
+      </p>
+    `;
+    return;
+  }
+
+  const sessao = obterSessao();
+
+  container.innerHTML = boloes
+    .map((b) => {
+      const souCriador = sessao && Number(b.criador?.id) === Number(sessao.usuarioId);
+      const minhaPart = (b.participantes || []).find((p) => Number(p.usuario?.id) === Number(sessao?.usuarioId));
+      const qtdJogos = (b.partidas || []).length;
+      const ativos = (b.participantes || []).filter(
+        (p) => p.status === 'ACEITO' || p.status === 'CONFIRMADO'
+      );
+      const poteAtual = ativos.length * Number(b.valorCota || 0);
+
+      let badgeStatus = `<span class="badge badge-aviso">${b.status}</span>`;
+      if (b.status === 'ABERTO') {
+        badgeStatus = `<span class="badge badge-info">🟢 ABERTO (${qtdJogos} Jogos)</span>`;
+      } else if (b.status === 'FINALIZADO') {
+        badgeStatus = `<span class="badge badge-online">🏆 FINALIZADO (Vencedor: ${escaparHtml(b.vencedor?.nome || '-')})</span>`;
+      } else if (b.status === 'CANCELADO') {
+        badgeStatus = `<span class="badge badge-offline">🚫 CANCELADO</span>`;
+      }
+
+      let rotuloAcao = '🔍 Abrir Bolão & Ranking';
+      if (souCriador && b.status === 'RASCUNHO') {
+        rotuloAcao = '⚙️ Definir Valor e Convidar Usuários';
+      } else if (minhaPart && minhaPart.status === 'PENDENTE') {
+        rotuloAcao = '🔔 Ver Card de Aceite do Bolão';
+      } else if (minhaPart && minhaPart.status === 'ACEITO') {
+        rotuloAcao = '🎯 Escolher Placares e Confirmar Aposta';
+      }
+
+      return `
+        <article class="card-partida card-partida-clicavel" data-card-bolao-id="${b.id}">
+          <div class="card-partida-topo">
+            <span class="liga-tag">Bolão #${b.id} • Criador: ${escaparHtml(b.criador?.nome)}</span>
+            ${badgeStatus}
+          </div>
+
+          <div class="comparativo-placares">
+            <div class="caixa-placar-info">
+              <span>💰 Valor por Pessoa</span>
+              <strong class="destaque-verde">${formatarMoeda(b.valorCota)}</strong>
+            </div>
+            <div class="caixa-placar-info">
+              <span>🏆 Pote (90% Vencedor / 10% Casa)</span>
+              <strong class="destaque-azul">${formatarMoeda(poteAtual)}</strong>
+            </div>
+          </div>
+
+          ${renderizarBoxConvidadosHover(b.participantes)}
+
+          <div class="card-partida-rodape">
+            <button type="button" class="btn btn-primario btn-bloco btn-abrir-bolao" data-bolao-id="${b.id}">
+              ${rotuloAcao}
+            </button>
+          </div>
+        </article>
+      `;
+    })
+    .join('');
+
+  container.querySelectorAll('[data-card-bolao-id]').forEach((card) => {
+    card.addEventListener('click', () => {
+      const id = Number(card.dataset.cardBolaoId);
+      const bolao = boloesCache.find((x) => Number(x.id) === id);
+      if (bolao) {
+        bolaoDetalheAtualId = bolao.id;
+        renderizarDetalheBolao(bolao);
+      }
+    });
+  });
+}
+
+async function renderizarDetalheBolao(bolao) {
+  const area = document.getElementById('area-bolao-detalhe');
+  if (!area) return;
+  area.classList.remove('oculto');
+
+  const sessao = obterSessao();
+  const souCriador = sessao && Number(bolao.criador?.id) === Number(sessao.usuarioId);
+  const minhaPart = (bolao.participantes || []).find((p) => Number(p.usuario?.id) === Number(sessao?.usuarioId));
+  const partidas = (bolao.partidas || []).map((bp) => bp.partida).filter(Boolean);
+
+  // 1) Se for CONVIDADO com status PENDENTE -> Passo 7: Card de Aceite com todas as partidas de cima para baixo, valor e Aceitar/Recusar
+  if (minhaPart && minhaPart.status === 'PENDENTE' && bolao.status === 'ABERTO') {
+    const listaJogosHtml = partidas
+      .map((p, idx) => {
+        const nomeCasa = p.timeCasa?.nome || 'Time Casa';
+        const nomeFora = p.timeFora?.nome || 'Time Fora';
+        const escudoCasa = p.timeCasa?.escudoUrl || ESCUDO_PADRAO;
+        const escudoFora = p.timeFora?.escudoUrl || ESCUDO_PADRAO;
+        const { placarExibicao } = obterEstadoTempoRealPartida(p);
+        const { data: dBr, hora: hBr } = extrairDataEHoraArena(p.data);
+        return `
+          <div class="item-vertical-bolao" style="cursor:default;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;">
+              <span class="liga-tag">Jogo ${idx + 1} • Partida #${p.id}</span>
+              <span class="badge badge-info">📅 ${escaparHtml(dBr)} (${escaparHtml(hBr)})</span>
+            </div>
+            <div class="confronto">
+              <div class="time-bloco">
+                <img src="${escaparHtml(escudoCasa)}" alt="${escaparHtml(nomeCasa)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+                <span class="nome-time">${escaparHtml(nomeCasa)}</span>
+              </div>
+              <div class="placar-central">
+                <span class="placar-numero">${escaparHtml(placarExibicao)}</span>
+                <span class="versus-label">📅 ${escaparHtml(dBr)}</span>
+                <span class="horario-partida">🕒 ${escaparHtml(hBr)}</span>
+              </div>
+              <div class="time-bloco">
+                <img src="${escaparHtml(escudoFora)}" alt="${escaparHtml(nomeFora)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+                <span class="nome-time">${escaparHtml(nomeFora)}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    area.innerHTML = `
+      <div class="painel-card painel-convites">
+        <h2>🔔 Card de Aceite do Bolão #${bolao.id} (Criado por ${escaparHtml(bolao.criador?.nome)})</h2>
+        <p>Confira todas as partidas deste bolão de cima para baixo (role com o mouse para ver todas):</p>
+        <div class="lista-vertical-bolao" style="max-height:260px;">
+          ${listaJogosHtml}
+        </div>
+        <div style="margin-top:16px;padding:14px;background:rgba(15,23,42,0.75);border-radius:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+          <div>
+            <span style="font-size:0.85rem;color:var(--texto-secundario);">Valor de Entrada do Bolão:</span>
+            <strong class="destaque-verde" style="font-size:1.35rem;margin-left:8px;">${formatarMoeda(bolao.valorCota)}</strong>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button type="button" id="btn-aceitar-convite-bolao" class="btn btn-primario">
+              ✅ Aceitar Bolão (Reter ${formatarMoeda(bolao.valorCota)})
+            </button>
+            <button type="button" id="btn-recusar-convite-bolao" class="btn btn-perigo">
+              ❌ Recusar
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.getElementById('btn-aceitar-convite-bolao')?.addEventListener('click', async () => {
+      try {
+        const atualizado = await requisicaoApi(`/boloes/${bolao.id}/aceitar`, {
+          method: 'POST',
+          body: JSON.stringify({ usuarioId: sessao.usuarioId }),
+        });
+        placaresConvidadoTemp = {};
+        partidaGrandeBolaoId = partidas[0]?.id || null;
+        mostrarToast(`Você aceitou o Bolão #${bolao.id}! Agora clique em cada partida para escolher seus placares.`);
+        await carregarMeusBoloes();
+        await renderizarDetalheBolao(atualizado);
+      } catch (erro) {
+        mostrarToast(erro.message, 'erro');
+      }
+    });
+
+    document.getElementById('btn-recusar-convite-bolao')?.addEventListener('click', async () => {
+      try {
+        await requisicaoApi(`/boloes/${bolao.id}/recusar`, {
+          method: 'POST',
+          body: JSON.stringify({ usuarioId: sessao.usuarioId }),
+        });
+        mostrarToast(`Convite do Bolão #${bolao.id} recusado.`);
+        await carregarMeusBoloes();
+      } catch (erro) {
+        mostrarToast(erro.message, 'erro');
+      }
+    });
+    return;
+  }
+
+  // 2) Se for CONVIDADO com status ACEITO (Passos 8 e 9): clicar numa partida abre ela GRANDE com combinações riscadas à esquerda e livres à direita + botão amarelo Confirmar Aposta
+  if (minhaPart && minhaPart.status === 'ACEITO' && bolao.status === 'ABERTO') {
+    if (!partidaGrandeBolaoId && partidas.length > 0) {
+      partidaGrandeBolaoId = partidas[0].id;
+    }
+    const partidaEmFoco = partidas.find((p) => Number(p.id) === Number(partidaGrandeBolaoId)) || partidas[0];
+    const htmlPalcoGrande = montarPalcoGrandePartidaBolao(bolao, partidaEmFoco, sessao.usuarioId);
+
+    const listaPartidasNavegacao = partidas
+      .map((p, idx) => {
+        const marcado = placaresConvidadoTemp[p.id];
+        const emFoco = Number(p.id) === Number(partidaEmFoco?.id);
+        return `
+          <div class="item-vertical-bolao ${emFoco ? 'ativo' : ''}" data-nav-partida-bolao="${p.id}">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+              <strong>${idx + 1}. ${escaparHtml(p.timeCasa?.nome)} x ${escaparHtml(p.timeFora?.nome)}</strong>
+              <span class="badge ${marcado ? 'badge-online' : 'badge-aviso'}">
+                ${marcado ? `✅ Marcado: ${marcado.replace('x', ' x ')}` : '⏳ Clique para abrir grande e escolher'}
+              </span>
+            </div>
+          </div>
+        `;
+      })
+      .join('');
+
+    area.innerHTML = `
+      <div class="painel-card">
+        <div class="cabecalho-secao">
+          <div>
+            <h2>🎯 Escolha seus Placares no Bolão #${bolao.id}</h2>
+            <p>Clique em cada partida abaixo para abri-la grande na tela. À esquerda aparecem riscadas as combinações já jogadas e à direita as combinações disponíveis.</p>
+          </div>
+          <button type="button" id="btn-desistir-bolao-aceito" class="btn btn-perigo btn-pequeno">
+            🏳️ Desistir do Bolão (Multa de 20%)
+          </button>
+        </div>
+
+        ${htmlPalcoGrande}
+
+        <h3 style="font-size:1rem;margin-top:14px;">Lista de Todas as Partidas do Bolão (${partidas.length}):</h3>
+        <div class="lista-vertical-bolao">
+          ${listaPartidasNavegacao}
+        </div>
+
+        <div style="display:flex;justify-content:center;margin-top:20px;">
+          <button type="button" id="btn-confirmar-aposta-bolao" class="btn-amarelo-confirmar">
+            Confirmar Aposta
+          </button>
+        </div>
+      </div>
+    `;
+
+    vincularEventosPalcoGrandeEConfirmacao(bolao, partidas);
+    return;
+  }
+
+  // 3) Visão do Bolão (Passo 6: configurar valor apenas na criação/rascunho; depois que já tem valor e nenhuma partida começou, exibe somente "Convidar mais participantes")
+  const nenhumaPartidaIniciadaComGolOuEncerrada = !partidas.some((p) => {
+    if (p.status === 'FINALIZADA') return true;
+    if (p.placar && p.placar.trim() !== '' && p.placar.trim() !== '0x0') return true;
+    return false;
+  });
+
+  let blocoConfigCriador = '';
+  if (souCriador && bolao.status === 'RASCUNHO') {
+    blocoConfigCriador = `
+      <div class="bloco-detalhe-x1" style="border-color:#eab308;margin-bottom:18px;">
+        <h3 style="font-size:1.05rem;margin-bottom:8px;">⚙️ Definir Valor Inicial do Bolão &amp; Convidar Participantes</h3>
+        <form id="form-configurar-bolao" class="formulario" style="margin-top:8px;">
+          <div class="grade-dupla">
+            <div class="campo-form">
+              <label for="bolao-input-valor">Valor do Bolão por Participante (R$)</label>
+              <input type="number" id="bolao-input-valor" class="input-padrao" min="1" step="0.01" value="50.00" required />
+            </div>
+            <div class="campo-form">
+              <label for="bolao-input-emails">E-mails dos Usuários Convidados (separe por vírgula)</label>
+              <input type="text" id="bolao-input-emails" list="lista-emails-sugeridos" class="input-padrao" value="" placeholder="usuario1@gmail.com , usuario2@gmail.com" required />
+            </div>
+          </div>
+          <button type="submit" class="btn btn-primario">📨 Inicializar Valor e Enviar Convites do Bolão</button>
+        </form>
+      </div>
+    `;
+  } else if (souCriador && bolao.status === 'ABERTO' && nenhumaPartidaIniciadaComGolOuEncerrada) {
+    blocoConfigCriador = `
+      <div class="bloco-detalhe-x1" style="border-color:#eab308;margin-bottom:18px;">
+        <h3 style="font-size:1.05rem;margin-bottom:8px;">📨 Convidar mais participantes</h3>
+        <form id="form-configurar-bolao" class="formulario" style="margin-top:8px;">
+          <input type="hidden" id="bolao-input-valor" value="${Number(bolao.valorCota).toFixed(2)}" />
+          <div class="campo-form">
+            <label for="bolao-input-emails">E-mails dos Novos Convidados (separe por vírgula)</label>
+            <input type="text" id="bolao-input-emails" list="lista-emails-sugeridos" class="input-padrao" value="" placeholder="usuario1@gmail.com , usuario2@gmail.com" required />
+          </div>
+          <button type="submit" class="btn btn-primario">📨 Convidar mais participantes</button>
+        </form>
+      </div>
+    `;
+  }
+
+  // Verifica se o criador pode cancelar (Regra 11) ou se o convidado pode desistir com multa de 20% (Regra 13)
+  let botaoCancelamentoOuDesistencia = '';
+  if (bolao.status !== 'FINALIZADO' && bolao.status !== 'CANCELADO') {
+    if (souCriador) {
+      botaoCancelamentoOuDesistencia = `
+        <button type="button" id="btn-cancelar-bolao-criador" class="btn btn-perigo btn-pequeno">
+          🚫 Cancelar Bolão (Só se ninguém aceitou ou todos desistiram)
+        </button>
+      `;
+    } else if (minhaPart && (minhaPart.status === 'ACEITO' || minhaPart.status === 'CONFIRMADO')) {
+      botaoCancelamentoOuDesistencia = `
+        <button type="button" id="btn-desistir-bolao-confirmado" class="btn btn-perigo btn-pequeno">
+          🏳️ Desistir do Bolão (Devolve 80% / Multa 20%)
+        </button>
+      `;
+    }
+  }
+
+  // Lista de todas as partidas daquele bolão (esquerda/centro) — com a caixinha visual de confronto igual ao Mural
+  const listaPartidasConfirmadasHtml = partidas
+    .map((p, idx) => {
+      const nomeCasa = p.timeCasa?.nome || 'Time Casa';
+      const nomeFora = p.timeFora?.nome || 'Time Fora';
+      const escudoCasa = p.timeCasa?.escudoUrl || ESCUDO_PADRAO;
+      const escudoFora = p.timeFora?.escudoUrl || ESCUDO_PADRAO;
+      const { placarExibicao, aoVivo, finalizada } = obterEstadoTempoRealPartida(p);
+      const meuPalpiteObj = (bolao.palpites || []).find(
+        (pal) => Number(pal.partida?.id) === Number(p.id) && Number(pal.usuario?.id) === Number(sessao?.usuarioId)
+      );
+      const todosPalpitesJogo = (bolao.palpites || []).filter((pal) => Number(pal.partida?.id) === Number(p.id));
+      const { data: dBr, hora: hBr } = extrairDataEHoraArena(p.data);
+
+      const badgeStatusJogo = finalizada
+        ? `<span class="badge badge-online">✅ FINALIZADA (${escaparHtml(placarExibicao)})</span>`
+        : aoVivo
+        ? `<span class="badge badge-info">🔴 AO VIVO (${escaparHtml(placarExibicao)})</span>`
+        : `<span class="badge badge-aviso">📅 ${escaparHtml(dBr)} (${escaparHtml(hBr)})</span>`;
+
+      return `
+        <div class="item-vertical-bolao" style="cursor:default;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+            <strong>${idx + 1}. ${escaparHtml(nomeCasa)} x ${escaparHtml(nomeFora)}</strong>
+            ${badgeStatusJogo}
+          </div>
+
+          <div class="confronto" style="margin: 8px 0;">
+            <div class="time-bloco">
+              <img src="${escaparHtml(escudoCasa)}" alt="${escaparHtml(nomeCasa)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+              <span class="nome-time">${escaparHtml(nomeCasa)}</span>
+            </div>
+
+            <div class="placar-central">
+              <span class="placar-numero">${escaparHtml(placarExibicao)}</span>
+              <span class="versus-label">📅 ${escaparHtml(dBr)}</span>
+              <span class="horario-partida">🕒 ${escaparHtml(hBr)}</span>
+            </div>
+
+            <div class="time-bloco">
+              <img src="${escaparHtml(escudoFora)}" alt="${escaparHtml(nomeFora)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+              <span class="nome-time">${escaparHtml(nomeFora)}</span>
+            </div>
+          </div>
+
+          <div style="margin-top:8px;font-size:0.86rem;display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+            <span>🎯 Seu Palpite: <strong class="destaque-verde">${escaparHtml(meuPalpiteObj?.placarPrevisto ? meuPalpiteObj.placarPrevisto.replace('x', ' x ') : '-')}</strong></span>
+            <span>Pontos ganhos: <strong class="destaque-azul">${meuPalpiteObj?.pontosObtidos ?? 0} pts</strong></span>
+          </div>
+          <div style="margin-top:6px;font-size:0.78rem;color:var(--texto-secundario);">
+            Combinações jogadas neste jogo: ${todosPalpitesJogo.map((tp) => `${escaparHtml(tp.usuario?.nome)}: <strong>${escaparHtml(tp.placarPrevisto)}</strong>`).join(' • ') || 'Nenhuma'}
+          </div>
+        </div>
+      `;
+    })
+    .join('');
+
+  // Ranking exclusivo daquele bolão na lateral direita (de cima para baixo — Passo 10)
+  const participantesAtivosOrdenados = [...(bolao.participantes || [])]
+    .filter((p) => p.status === 'CONFIRMADO' || p.status === 'ACEITO')
+    .sort((a, b) => Number(b.pontosTotais || 0) - Number(a.pontosTotais || 0));
+
+  const rankingBolaoLateralHtml = participantesAtivosOrdenados
+    .map((p, idx) => {
+      const medalhas = ['🥇 1º', '🥈 2º', '🥉 3º'];
+      const pos = medalhas[idx] || `${idx + 1}º`;
+      return `
+        <div class="item-ranking-bolao">
+          <div>
+            <strong>${pos} — ${escaparHtml(p.usuario?.nome)}</strong>
+            <div style="font-size:0.75rem;color:var(--texto-secundario);">${escaparHtml(p.usuario?.email)}</div>
+          </div>
+          <span class="pontos-pill">${Number(p.pontosTotais || 0)} pts</span>
+        </div>
+      `;
+    })
+    .join('');
+
+  const poteTotal = participantesAtivosOrdenados.length * Number(bolao.valorCota || 0);
+  const comissao10 = poteTotal * 0.1;
+  const premio90 = poteTotal - comissao10;
+
+  area.innerHTML = `
+    <div class="painel-card">
+      <div class="cabecalho-secao">
+        <div>
+          <h2>🎲 Detalhes do Bolão #${bolao.id} — Status: ${bolao.status}</h2>
+          <p>Valor por participante: <strong>${formatarMoeda(bolao.valorCota)}</strong> • Pote Total: <strong>${formatarMoeda(poteTotal)}</strong> (Prêmio Vencedor 90%: <strong class="destaque-verde">${formatarMoeda(premio90)}</strong> | Comissão da Casa 10%: <strong class="destaque-amarelo">${formatarMoeda(comissao10)}</strong>)</p>
+        </div>
+        ${botaoCancelamentoOuDesistencia}
+      </div>
+
+      ${blocoConfigCriador}
+      ${renderizarBoxConvidadosHover(bolao.participantes)}
+
+      <div class="layout-bolao-ranking-lateral">
+        <div>
+          <h3 style="font-size:1.05rem;margin-bottom:10px;">🏟️ Partidas deste Bolão (${partidas.length})</h3>
+          <div class="lista-vertical-bolao" style="max-height:none;">
+            ${listaPartidasConfirmadasHtml}
+          </div>
+        </div>
+
+        <aside class="lateral-direita-ranking-bolao">
+          <h3 style="font-size:1.05rem;">🏆 Ranking do Bolão #${bolao.id}</h3>
+          <p style="font-size:0.8rem;color:var(--texto-secundario);margin-bottom:6px;">Classificação de cima para baixo por pontos acumulados nos jogos do bolão:</p>
+          ${rankingBolaoLateralHtml || '<p class="texto-vazio">Nenhum participante ativo.</p>'}
+        </aside>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('form-configurar-bolao')?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const valorCota = Number(document.getElementById('bolao-input-valor').value);
+    const bruto = document.getElementById('bolao-input-emails').value;
+    const emailsConvidados = bruto
+      .split(/[,;\s]+/)
+      .map((e) => e.trim())
+      .filter(Boolean);
+
+    try {
+      const atualizado = await requisicaoApi(`/boloes/${bolao.id}/configurar`, {
+        method: 'POST',
+        body: JSON.stringify({
+          usuarioId: sessao.usuarioId,
+          valorCota,
+          emailsConvidados,
+        }),
+      });
+      mostrarToast(
+        `📨 Convite(s) do Bolão #${bolao.id} enviado(s) com sucesso para ${emailsConvidados.join(', ')} (Valor: ${formatarMoeda(valorCota)})!`,
+        'sucesso',
+        8000
+      );
+      await carregarMeusBoloes();
+      await renderizarDetalheBolao(atualizado);
+    } catch (erro) {
+      mostrarToast(erro.message, 'erro');
+    }
+  });
+
+  document.getElementById('btn-cancelar-bolao-criador')?.addEventListener('click', async () => {
+    try {
+      await requisicaoApi(`/boloes/${bolao.id}/cancelar`, {
+        method: 'POST',
+        body: JSON.stringify({ usuarioId: sessao.usuarioId }),
+      });
+      mostrarToast(`Bolão #${bolao.id} cancelado e valor estornado para sua conta!`);
+      await carregarMeusBoloes();
+    } catch (erro) {
+      mostrarToast(erro.message, 'erro');
+    }
+  });
+
+  document.getElementById('btn-desistir-bolao-confirmado')?.addEventListener('click', async () => {
+    await executarDesistenciaBolao(bolao.id, sessao.usuarioId);
+  });
+}
+
+function montarPalcoGrandePartidaBolao(bolao, partida, meuUsuarioId) {
+  if (!partida) return '';
+  const nomeCasa = partida.timeCasa?.nome || 'Time Mandante';
+  const nomeFora = partida.timeFora?.nome || 'Time Visitante';
+  const escudoCasa = partida.timeCasa?.escudoUrl || ESCUDO_PADRAO;
+  const escudoFora = partida.timeFora?.escudoUrl || ESCUDO_PADRAO;
+
+  // Combinações já jogadas por outros participantes ativos nesta partida
+  const jaJogadasSet = new Set(
+    (bolao.palpites || [])
+      .filter(
+        (pal) =>
+          Number(pal.partida?.id) === Number(partida.id) &&
+          Number(pal.usuario?.id) !== Number(meuUsuarioId)
+      )
+      .map((pal) => (pal.placarPrevisto || '').toLowerCase())
+      .filter(Boolean)
+  );
+
+  const listaRiscadas = Array.from(jaJogadasSet);
+  const listaLivres = COMBINACOES_PADRAO_BOLAO.filter((c) => !jaJogadasSet.has(c));
+
+  const salvo = placaresConvidadoTemp[partida.id] || '';
+  const [gCasa = '', gFora = ''] = salvo ? salvo.split('x') : ['', ''];
+
+  return `
+    <div class="palco-grande-bolao">
+      <!-- Lado Esquerdo: Combinações já jogadas (Riscadas) -->
+      <div class="coluna-combinacoes">
+        <strong style="font-size:0.86rem;color:#fca5a5;">🚫 Combinações Já Jogadas (Riscadas)</strong>
+        <small style="font-size:0.75rem;color:var(--texto-secundario);">Estes placares já foram escolhidos nesta partida:</small>
+        <div class="grade-pills-placar">
+          ${
+            listaRiscadas.length > 0
+              ? listaRiscadas.map((c) => `<span class="pill-placar-riscado">${escaparHtml(c.replace('x', ' x '))}</span>`).join('')
+              : `<span style="font-size:0.8rem;color:var(--texto-secundario);">Nenhuma combinação ocupada ainda.</span>`
+          }
+        </div>
+      </div>
+
+      <!-- Centro: Partida Grande na Tela -->
+      <div class="card-central-grande">
+        <span class="badge badge-aviso">PARTIDA EM DESTAQUE • #${partida.id}</span>
+        <div style="display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;">
+          <div class="time-bloco">
+            <img src="${escaparHtml(escudoCasa)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+            <span class="nome-time">${escaparHtml(nomeCasa)}</span>
+          </div>
+          <div class="placar-inputs">
+            <input type="number" min="0" max="99" id="input-grande-casa" value="${escaparHtml(gCasa)}" placeholder="0" class="input-padrao input-gols" style="width:64px;font-size:1.25rem;" />
+            <span class="versus-label" style="font-size:1.1rem;">X</span>
+            <input type="number" min="0" max="99" id="input-grande-fora" value="${escaparHtml(gFora)}" placeholder="0" class="input-padrao input-gols" style="width:64px;font-size:1.25rem;" />
+          </div>
+          <div class="time-bloco">
+            <img src="${escaparHtml(escudoFora)}" class="escudo-time" onerror="this.src='${ESCUDO_PADRAO}'" />
+            <span class="nome-time">${escaparHtml(nomeFora)}</span>
+          </div>
+        </div>
+        <small style="color:var(--texto-secundario);">Digite nas caixinhas acima ou clique em uma combinação disponível à direita.</small>
+      </div>
+
+      <!-- Lado Direito: Combinações que ainda podem ser feitas -->
+      <div class="coluna-combinacoes">
+        <strong style="font-size:0.86rem;color:#34d399;">✅ Combinações Disponíveis</strong>
+        <small style="font-size:0.75rem;color:var(--texto-secundario);">Clique em uma combinação para preencher o placar:</small>
+        <div class="grade-pills-placar">
+          ${listaLivres
+            .map(
+              (c) =>
+                `<button type="button" class="pill-placar-livre" data-combinacao-livre="${c}">${escaparHtml(c.replace('x', ' x '))}</button>`
+            )
+            .join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function vincularEventosPalcoGrandeEConfirmacao(bolao, partidas) {
+  const sessao = obterSessao();
+  const partidaEmFoco = partidas.find((p) => Number(p.id) === Number(partidaGrandeBolaoId)) || partidas[0];
+
+  const salvarInputsAtuais = () => {
+    if (!partidaEmFoco) return;
+    const c = document.getElementById('input-grande-casa')?.value.trim();
+    const f = document.getElementById('input-grande-fora')?.value.trim();
+    if (c !== '' && f !== '') {
+      placaresConvidadoTemp[partidaEmFoco.id] = `${c}x${f}`;
+    } else {
+      delete placaresConvidadoTemp[partidaEmFoco.id];
+    }
+  };
+
+  document.getElementById('input-grande-casa')?.addEventListener('input', salvarInputsAtuais);
+  document.getElementById('input-grande-fora')?.addEventListener('input', salvarInputsAtuais);
+
+  document.querySelectorAll('[data-combinacao-livre]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const comb = btn.dataset.combinacaoLivre;
+      if (!comb || !partidaEmFoco) return;
+      placaresConvidadoTemp[partidaEmFoco.id] = comb;
+      renderizarDetalheBolao(bolao);
+    });
+  });
+
+  document.querySelectorAll('[data-nav-partida-bolao]').forEach((item) => {
+    item.addEventListener('click', () => {
+      salvarInputsAtuais();
+      partidaGrandeBolaoId = Number(item.dataset.navPartidaBolao);
+      renderizarDetalheBolao(bolao);
+    });
+  });
+
+  document.getElementById('btn-desistir-bolao-aceito')?.addEventListener('click', async () => {
+    await executarDesistenciaBolao(bolao.id, sessao.usuarioId);
+  });
+
+  // Passo 9: Botão amarelo "Confirmar Aposta" — alerta de 3 segundos no canto direito para cada partida esquecida
+  document.getElementById('btn-confirmar-aposta-bolao')?.addEventListener('click', async () => {
+    salvarInputsAtuais();
+    const esquecidas = [];
+    const payload = [];
+
+    partidas.forEach((p) => {
+      const placar = placaresConvidadoTemp[p.id];
+      if (!placar) {
+        esquecidas.push(`${p.timeCasa?.nome || 'Mandante'} x ${p.timeFora?.nome || 'Visitante'}`);
+      } else {
+        payload.push({ partidaId: p.id, placar });
+      }
+    });
+
+    if (esquecidas.length > 0) {
+      esquecidas.forEach((jogo) => {
+        mostrarToast(`⚠️ Você esqueceu de marcar um resultado na partida: ${jogo}`, 'erro', 3000);
+      });
+      return;
+    }
+
+    try {
+      const confirmado = await requisicaoApi(`/boloes/${bolao.id}/confirmar-aposta`, {
+        method: 'POST',
+        body: JSON.stringify({
+          usuarioId: sessao.usuarioId,
+          palpites: payload,
+        }),
+      });
+      mostrarToast(`Aposta confirmada no Bolão #${bolao.id}! Confira as partidas e o ranking na lateral direita.`);
+      await carregarMeusBoloes();
+      await renderizarDetalheBolao(confirmado);
+    } catch (erro) {
+      mostrarToast(erro.message, 'erro');
+    }
+  });
+}
+
+async function executarDesistenciaBolao(bolaoId, usuarioId) {
+  try {
+    await requisicaoApi(`/boloes/${bolaoId}/desistir`, {
+      method: 'POST',
+      body: JSON.stringify({ usuarioId }),
+    });
+    mostrarToast(
+      `Você desistiu do Bolão #${bolaoId}. O valor foi devolvido para sua conta com desconto da penalidade de 20% (enviada à Carteira Casa).`
+    );
+    await carregarMeusBoloes();
+  } catch (erro) {
+    mostrarToast(erro.message, 'erro');
+  }
+}
