@@ -448,6 +448,27 @@ async function buscarEventosDiaTheSportsDB(dataIso) {
   return Array.isArray(dados.events) ? dados.events : [];
 }
 
+async function enriquecerPlacaresTempoRealLookup(eventos) {
+  if (!Array.isArray(eventos) || eventos.length === 0) return eventos;
+  const enriquecidos = await Promise.all(
+    eventos.map(async (ev) => {
+      if (!ev || !ev.idEvent || ev.strStatus === 'FT') return ev;
+      try {
+        const resp = await fetch(
+          `https://www.thesportsdb.com/api/v1/json/123/lookupevent.php?id=${encodeURIComponent(ev.idEvent)}&_t=${Date.now()}`
+        );
+        if (!resp.ok) return ev;
+        const dados = await resp.json();
+        const atualizado = Array.isArray(dados?.events) ? dados.events[0] : null;
+        return atualizado ? { ...ev, ...atualizado } : ev;
+      } catch {
+        return ev;
+      }
+    })
+  );
+  return enriquecidos;
+}
+
 async function carregarPartidasExternasHojeEAmanha() {
   const container = document.getElementById('lista-partidas-externas');
   const data1 = document.getElementById('filtro-data-hoje')?.value || obterDataLocalFormatada(0);
@@ -482,8 +503,9 @@ async function carregarPartidasExternasHojeEAmanha() {
       return String(a.dateEvent || '').localeCompare(String(b.dateEvent || ''));
     });
 
-    // Mantém as 9 partidas principais para o Mural de Partidas
-    partidasExternasCache = lista.slice(0, LIMITE_MURAL_PARTIDAS);
+    // Mantém as 9 partidas principais e consulta lookupevent.php sem cache para placar em tempo real
+    const top9 = await enriquecerPlacaresTempoRealLookup(lista.slice(0, LIMITE_MURAL_PARTIDAS));
+    partidasExternasCache = top9;
     renderizarPartidasExternas(partidasExternasCache, data1);
     return partidasExternasCache;
   } catch (erro) {
@@ -665,7 +687,7 @@ function obterEstadoTempoRealPartida(p) {
   );
 
   let placarBruto = p.placar && String(p.placar).trim() !== '' ? String(p.placar).trim() : null;
-  if (!placarBruto && eventoExternoTemPlacar(evExterno)) {
+  if (!finalizada && eventoExternoTemPlacar(evExterno)) {
     placarBruto = `${String(evExterno.intHomeScore).trim()}x${String(evExterno.intAwayScore).trim()}`;
   }
 
@@ -2022,9 +2044,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       await carregarConvitesPendentes();
     }
     contadorCiclosTempoReal++;
-    if (contadorCiclosTempoReal % 3 === 0) {
+    if (contadorCiclosTempoReal % 2 === 0) {
       await carregarPartidasExternasHojeEAmanha();
       await importarTodasPartidasExternas(true);
+      await sincronizarDadosUsuarioLogado();
+      if (document.getElementById('aba-boloes')?.classList.contains('ativa')) {
+        await carregarMeusBoloes();
+      } else if (document.getElementById('aba-palpites')?.classList.contains('ativa')) {
+        await carregarMinhasApostas();
+      }
     }
   }, 10000);
   inicializarEventosBolao();
