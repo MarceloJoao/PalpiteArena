@@ -1,5 +1,6 @@
 package br.edu.arenapro.resources;
 
+import br.edu.arenapro.domain.Bolao;
 import br.edu.arenapro.domain.CarteiraCasa;
 import br.edu.arenapro.domain.DesafioX1;
 import br.edu.arenapro.domain.NotificadorPalpite;
@@ -9,6 +10,7 @@ import br.edu.arenapro.domain.Partida;
 import br.edu.arenapro.domain.StatusPartida;
 import br.edu.arenapro.domain.Time;
 import br.edu.arenapro.domain.Usuario;
+import br.edu.arenapro.repository.BolaoRepository;
 import br.edu.arenapro.repository.CarteiraCasaRepository;
 import br.edu.arenapro.repository.DesafioRepository;
 import br.edu.arenapro.repository.PalpiteRepository;
@@ -57,6 +59,9 @@ public class PartidaResource {
 
     @Inject
     DesafioRepository desafioRepository;
+
+    @Inject
+    BolaoRepository bolaoRepository;
 
     @Inject
     CarteiraCasaRepository carteiraCasaRepository;
@@ -226,6 +231,16 @@ public class PartidaResource {
                 for (DesafioX1 desafio : desafios) {
                     desafio.verificarExpiracaoPorGolOuFim();
                 }
+            }
+        }
+
+        if (bolaoRepository != null && partida.getId() != null) {
+            CarteiraCasa carteiraCasa = carteiraCasaRepository != null
+                    ? carteiraCasaRepository.obterOuCriar()
+                    : new CarteiraCasa();
+            List<Bolao> boloes = bolaoRepository.listarPorPartida(partida.getId());
+            for (Bolao bolao : boloes) {
+                bolao.apurarPontosELiquidarSeFinalizado(carteiraCasa);
             }
         }
 
