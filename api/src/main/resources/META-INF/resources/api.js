@@ -1539,19 +1539,19 @@ function abrirModalDetalheAposta(desafioId) {
   corpo.innerHTML = `
     <div class="bloco-detalhe-x1">
       <div class="linha-detalhe-x1">
-        <span>👤 Desafiante (Usuário A)</span>
-        <strong>${escaparHtml(d.desafiante?.nome)} (${escaparHtml(d.desafiante?.email)})</strong>
+        <span>👤 Desafiante</span>
+        <strong>${escaparHtml(d.desafiante?.nome)}</strong>
       </div>
       <div class="linha-detalhe-x1">
-        <span>🎯 Opção do Desafiante (A)</span>
+        <span>🎯 Palpite</span>
         <strong class="destaque-verde">${escaparHtml(traduzirOpcaoDesafio(d.opcaoDesafiante, partida))}</strong>
       </div>
       <div class="linha-detalhe-x1">
-        <span>⚔️ Desafiado (Usuário B)</span>
-        <strong>${escaparHtml(d.desafiado?.nome)} (${escaparHtml(d.desafiado?.email)})</strong>
+        <span>⚔️ Desafiado</span>
+        <strong>${escaparHtml(d.desafiado?.nome)}</strong>
       </div>
       <div class="linha-detalhe-x1">
-        <span>🎯 Opção do Desafiado (B)</span>
+        <span>🎯 Palpite</span>
         <strong class="destaque-azul">${escaparHtml(traduzirOpcaoDesafio(d.opcaoDesafiado, partida))}</strong>
       </div>
     </div>
@@ -1570,7 +1570,7 @@ function abrirModalDetalheAposta(desafioId) {
         <strong class="destaque-verde">${formatarMoeda(d.status === 'FINALIZADO' ? d.premioVencedor : premioEstimado)}</strong>
       </div>
       <div class="linha-detalhe-x1">
-        <span>🏟️ Status da Partida / Placar Oficial</span>
+        <span>🏟️ Status da Partida</span>
         <strong>${escaparHtml(partida.status || 'AGENDADA')} ${partida.placar ? `(${escaparHtml(partida.placar)})` : ''}</strong>
       </div>
     </div>
