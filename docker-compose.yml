@@ -11,14 +11,14 @@ services:
         required: false
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-palpitearena}
-      POSTGRES_USER: ${DATABASE_USER:-postgres}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-postgres}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-postgres} -d ${POSTGRES_DB:-palpitearena}"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DB:-palpitearena}"]
       interval: 3s
       timeout: 5s
       retries: 20
@@ -48,6 +48,7 @@ services:
 
   # Container do servico principal (Java 21 + Quarkus)
   api:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: api/Dockerfile
