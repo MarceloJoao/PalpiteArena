@@ -99,13 +99,7 @@ func (s *ServicoNotificacao) NotificarResultadoPalpite(
 		return nil, fmt.Errorf("%w: %w", ErrPrazoExcedido, err)
 	}
 
-	assunto := fmt.Sprintf("ArenaPro — Resultado do seu palpite em %s", partidaDescricao)
-	corpo := fmt.Sprintf(
-		"Ola! A partida %s terminou com placar %s. Voce obteve %d ponto(s) com seu palpite!",
-		partidaDescricao,
-		placar,
-		pontos,
-	)
+	assunto, corpo := montarAssuntoECorpoEmail(partidaDescricao, placar, pontos)
 
 	if err := s.enviador.Enviar(ctx, destinatario, assunto, corpo); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrEnvioFalhou, err)
@@ -121,6 +115,35 @@ func (s *ServicoNotificacao) NotificarResultadoPalpite(
 	}
 
 	return notificacao, nil
+}
+
+func montarAssuntoECorpoEmail(partidaDescricao string, placar string, pontos int) (string, string) {
+	switch {
+	case strings.HasPrefix(partidaDescricao, "CADASTRO:"):
+		msg := strings.TrimSpace(strings.TrimPrefix(partidaDescricao, "CADASTRO:"))
+		return "PalpiteArena — Bem-vindo(a)! Sua conta foi criada", msg
+	case strings.HasPrefix(partidaDescricao, "CONVITE DESAFIO X1:"):
+		msg := strings.TrimSpace(strings.TrimPrefix(partidaDescricao, "CONVITE DESAFIO X1:"))
+		return "PalpiteArena — Voce recebeu um Convite de Desafio X1!", msg
+	case strings.HasPrefix(partidaDescricao, "RESULTADO DESAFIO X1:"):
+		msg := strings.TrimSpace(strings.TrimPrefix(partidaDescricao, "RESULTADO DESAFIO X1:"))
+		return "PalpiteArena — Resultado e Liquidacao do seu Desafio X1", msg
+	case strings.HasPrefix(partidaDescricao, "CONVITE BOLAO:"):
+		msg := strings.TrimSpace(strings.TrimPrefix(partidaDescricao, "CONVITE BOLAO:"))
+		return "PalpiteArena — Voce foi convidado(a) para um Bolao!", msg
+	case strings.HasPrefix(partidaDescricao, "RESULTADO BOLAO:"):
+		msg := strings.TrimSpace(strings.TrimPrefix(partidaDescricao, "RESULTADO BOLAO:"))
+		return "PalpiteArena — Resultado Final e Premiacao do Bolao", msg
+	default:
+		assunto := fmt.Sprintf("ArenaPro — Resultado do seu palpite em %s", partidaDescricao)
+		corpo := fmt.Sprintf(
+			"Ola! A partida %s terminou com placar %s. Voce obteve %d ponto(s) com seu palpite!",
+			partidaDescricao,
+			placar,
+			pontos,
+		)
+		return assunto, corpo
+	}
 }
 
 // ConsultarResultadoPartida consulta a porta de saida da API externa de esportes respeitando o contexto

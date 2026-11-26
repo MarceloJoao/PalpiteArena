@@ -2,6 +2,7 @@ package br.edu.arenapro.resources;
 
 import br.edu.arenapro.domain.Bolao;
 import br.edu.arenapro.domain.CarteiraCasa;
+import br.edu.arenapro.domain.NotificadorPalpite;
 import br.edu.arenapro.domain.Partida;
 import br.edu.arenapro.domain.Usuario;
 import br.edu.arenapro.repository.BolaoRepository;
@@ -61,6 +62,9 @@ public class BolaoResource {
 
     @Inject
     CarteiraCasaRepository carteiraCasaRepository;
+
+    @Inject
+    NotificadorPalpite notificador;
 
     @GET
     @Transactional
@@ -171,6 +175,11 @@ public class BolaoResource {
             bolao.configurarValorEConvidados(corpo.usuarioId(), corpo.valorCota(), convidados);
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new RegraNegocioException(e.getMessage());
+        }
+        if (notificador != null) {
+            for (Usuario convidado : convidados) {
+                notificador.notificarConviteBolao(bolao, convidado);
+            }
         }
         return Response.ok(bolao).build();
     }

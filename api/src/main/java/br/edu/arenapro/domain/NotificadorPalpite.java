@@ -12,7 +12,23 @@ public interface NotificadorPalpite {
 
     boolean notificarResultado(Palpite palpite);
 
+    default boolean notificarCadastroUsuario(Usuario usuario) {
+        return false;
+    }
+
     default boolean notificarConviteDesafio(DesafioX1 desafio) {
+        return false;
+    }
+
+    default boolean notificarResultadoDesafio(DesafioX1 desafio) {
+        return false;
+    }
+
+    default boolean notificarConviteBolao(Bolao bolao, Usuario convidado) {
+        return false;
+    }
+
+    default boolean notificarResultadoBolao(Bolao bolao) {
         return false;
     }
 
