@@ -248,16 +248,19 @@
         </div>
       </div>
 
-      <!-- Tabela de Classificação Geral -->
+      <!-- Tabela de Classificação Geral (2 Rankings: Desafios X1 e Bolões) -->
       <div class="painel-card painel-destaque">
         <div class="cabecalho-secao">
           <div>
             <h2>🏆 Classificação de Usuários da Plataforma</h2>
-            <p>Usuários cadastrados na PalpiteArena.</p>
+            <p id="subtitulo-ranking-plataforma">Ranking de ganhadores de desafios individuais (X1).</p>
           </div>
           <div class="acoes-secao">
-            <button id="btn-recarregar-ranking" class="btn btn-secundario" type="button">
-              🔄 Atualizar Lista
+            <button id="btn-subranking-x1" class="btn btn-primario" type="button">
+              ⚔️ Ranking Desafios (X1)
+            </button>
+            <button id="btn-subranking-boloes" class="btn btn-secundario" type="button">
+              🎲 Ranking Bolões
             </button>
           </div>
         </div>
@@ -268,9 +271,8 @@
               <tr>
                 <th>Posição</th>
                 <th>Usuário</th>
-                <th>E-mail (para desafiar)</th>
-                <th class="col-direita">Pontos (Palpites)</th>
-                <th class="col-direita">Saldo Disponível</th>
+                <th>E-mail</th>
+                <th class="col-direita" id="th-coluna-vitorias-ranking">X1 Vencidos</th>
               </tr>
             </thead>
             <tbody id="corpo-tabela-ranking">

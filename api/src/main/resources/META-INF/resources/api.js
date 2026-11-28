@@ -1835,49 +1835,129 @@ function abrirModalDetalheAposta(desafioId) {
 }
 
 /* ==========================================================================
-   6. RANKING DE USUÁRIOS (ABA 4) E PAINEL ADMINISTRATIVO (ABA 5)
+   6. RANKING DE USUÁRIOS (2 RANKINGS: DESAFIOS X1 E BOLÕES, 4 COLUNAS) E PAINEL ADMIN
    ========================================================================== */
+
+let modoRankingAtual = 'x1';
+
+function alternarModoRanking(novoModo) {
+  modoRankingAtual = novoModo === 'boloes' ? 'boloes' : 'x1';
+  const btnX1 = document.getElementById('btn-subranking-x1');
+  const btnBoloes = document.getElementById('btn-subranking-boloes');
+  const thColuna = document.getElementById('th-coluna-vitorias-ranking');
+  const subtitulo = document.getElementById('subtitulo-ranking-plataforma');
+
+  if (btnX1 && btnBoloes) {
+    btnX1.className = modoRankingAtual === 'x1' ? 'btn btn-primario' : 'btn btn-secundario';
+    btnBoloes.className = modoRankingAtual === 'boloes' ? 'btn btn-primario' : 'btn btn-secundario';
+  }
+  if (thColuna) {
+    thColuna.textContent = modoRankingAtual === 'x1' ? 'X1 Vencidos' : 'Bolões Vencidos';
+  }
+  if (subtitulo) {
+    subtitulo.textContent =
+      modoRankingAtual === 'x1'
+        ? 'Ranking de ganhadores de desafios individuais (X1).'
+        : 'Ranking de vencedores de bolões.';
+  }
+  carregarRanking();
+}
+
+function obterIdsVencedoresBolaoFinalizado(bolao) {
+  if (!bolao || bolao.status !== 'FINALIZADO') return [];
+  const ativos = (bolao.participantes || []).filter(
+    (p) => p.status === 'CONFIRMADO' || p.status === 'ACEITO'
+  );
+  if (ativos.length === 0) return [];
+  const maiorPontuacao = Math.max(...ativos.map((p) => Number(p.pontosTotais || 0)));
+  if (maiorPontuacao <= 0) return [];
+  const primeiros = ativos.filter((p) => Number(p.pontosTotais || 0) === maiorPontuacao);
+  if (primeiros.length === ativos.length) return [];
+  return primeiros.map((p) => Number(p.usuario?.id)).filter(Boolean);
+}
 
 async function carregarRanking() {
   const tbody = document.getElementById('corpo-tabela-ranking');
   if (!tbody) return [];
 
   try {
-    const usuarios = await requisicaoApi('/usuarios/ranking?pagina=0&tamanho=100');
-    const lista = Array.isArray(usuarios) ? usuarios : [];
+    const [usuarios, desafios, boloes] = await Promise.all([
+      requisicaoApi('/usuarios?pagina=0&tamanho=100'),
+      requisicaoApi('/desafios?pagina=0&tamanho=100').catch(() => []),
+      requisicaoApi('/boloes').catch(() => []),
+    ]);
 
-    if (lista.length === 0) {
+    const listaUsuarios = (Array.isArray(usuarios) ? usuarios : []).filter(
+      (u) => !String(u.email || '').trim().toLowerCase().startsWith('admin@')
+    );
+
+    if (listaUsuarios.length === 0) {
       tbody.innerHTML = `<tr><td colspan="4" class="texto-vazio">Nenhum usuário cadastrado.</td></tr>`;
       return [];
     }
 
-    const sessao = obterSessao();
-    const medalhas = ['🥇 1º', '🥈 2º', '🥉 3º'];
+    const contagemVitorias = new Map();
+    listaUsuarios.forEach((u) => contagemVitorias.set(Number(u.id), 0));
 
-    tbody.innerHTML = lista
-      .map((u, idx) => {
-        const posicao = medalhas[idx] || `${idx + 1}º`;
+    if (modoRankingAtual === 'x1') {
+      (Array.isArray(desafios) ? desafios : []).forEach((d) => {
+        if (d.status === 'FINALIZADO' && d.vencedor?.id) {
+          const vid = Number(d.vencedor.id);
+          if (contagemVitorias.has(vid)) {
+            contagemVitorias.set(vid, contagemVitorias.get(vid) + 1);
+          }
+        }
+      });
+    } else {
+      (Array.isArray(boloes) ? boloes : []).forEach((b) => {
+        const idsVencedores = obterIdsVencedoresBolaoFinalizado(b);
+        idsVencedores.forEach((vid) => {
+          if (contagemVitorias.has(vid)) {
+            contagemVitorias.set(vid, contagemVitorias.get(vid) + 1);
+          }
+        });
+      });
+    }
+
+    const ordenados = [...listaUsuarios].sort((a, b) => {
+      const va = contagemVitorias.get(Number(a.id)) || 0;
+      const vb = contagemVitorias.get(Number(b.id)) || 0;
+      if (vb !== va) return vb - va;
+      return String(a.nome || '').localeCompare(String(b.nome || ''));
+    });
+
+    const sessao = obterSessao();
+    const medalhas = { 1: '🥇 1º', 2: '🥈 2º', 3: '🥉 3º' };
+    let posicaoAtual = 1;
+    let valorAnterior = null;
+
+    tbody.innerHTML = ordenados
+      .map((u) => {
+        const qtdVencidos = contagemVitorias.get(Number(u.id)) || 0;
+        if (valorAnterior !== null && qtdVencidos < valorAnterior) {
+          posicaoAtual++;
+        }
+        valorAnterior = qtdVencidos;
+
+        const rotuloPosicao = medalhas[posicaoAtual] || `${posicaoAtual}º`;
         const ehUsuarioAtual = sessao && Number(sessao.usuarioId) === Number(u.id);
         const classeLinha = ehUsuarioAtual ? 'linha-usuario-atual' : '';
         const tagVoce = ehUsuarioAtual ? ' <span class="badge badge-online">Você</span>' : '';
 
         return `
           <tr class="${classeLinha}">
-            <td><strong>${posicao}</strong></td>
+            <td><strong>${rotuloPosicao}</strong></td>
             <td><strong>${escaparHtml(u.nome)}</strong>${tagVoce}</td>
             <td><code>${escaparHtml(u.email)}</code></td>
             <td class="col-direita">
-              <span class="pontos-pill">${Number(u.pontuacaoTotal || 0)} pts</span>
-            </td>
-            <td class="col-direita">
-              <span class="pontos-pill">${formatarMoeda(u.saldo)}</span>
+              <span class="pontos-pill">${qtdVencidos}</span>
             </td>
           </tr>
         `;
       })
       .join('');
 
-    return lista;
+    return ordenados;
   } catch (erro) {
     tbody.innerHTML = `<tr><td colspan="4" class="texto-vazio">⚠️ Erro ao carregar usuários (${escaparHtml(erro.message)}).</td></tr>`;
     return [];
@@ -2234,7 +2314,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   document.getElementById('btn-recarregar-palpites')?.addEventListener('click', carregarMinhasApostas);
   document.getElementById('filtro-escopo-palpites')?.addEventListener('change', carregarMinhasApostas);
-  document.getElementById('btn-recarregar-ranking')?.addEventListener('click', carregarRanking);
+  document.getElementById('btn-subranking-x1')?.addEventListener('click', () => alternarModoRanking('x1'));
+  document.getElementById('btn-subranking-boloes')?.addEventListener('click', () => alternarModoRanking('boloes'));
 
   // Painel Admin
   document.getElementById('form-creditar-saldo')?.addEventListener('submit', creditarSaldoAdmin);
@@ -2298,10 +2379,12 @@ let bolaoDetalheAtualId = null;
 let partidaGrandeBolaoId = null;
 let placaresConvidadoTemp = {};
 
+// 16 combinações rápidas de placar (0 a 3 x 0 a 3)
 const COMBINACOES_PADRAO_BOLAO = [
-  '1x0', '2x0', '2x1', '3x0', '3x1', '3x2',
-  '0x0', '1x1', '2x2',
-  '0x1', '0x2', '1x2', '0x3', '1x3', '2x3',
+  '0x0', '0x1', '0x2', '0x3',
+  '1x0', '1x1', '1x2', '1x3',
+  '2x0', '2x1', '2x2', '2x3',
+  '3x0', '3x1', '3x2', '3x3',
 ];
 
 function inicializarEventosBolao() {
@@ -2956,30 +3039,35 @@ async function renderizarDetalheBolao(bolao) {
             <span>🎯 Seu Palpite: <strong class="destaque-verde">${escaparHtml(meuPalpiteObj?.placarPrevisto ? meuPalpiteObj.placarPrevisto.replace('x', ' x ') : '-')}</strong></span>
             <span>Pontos ganhos: <strong class="destaque-azul">${meuPalpiteObj?.pontosObtidos ?? 0} pts</strong></span>
           </div>
-          <div style="margin-top:6px;font-size:0.78rem;color:var(--texto-secundario);">
-            Combinações jogadas neste jogo: ${todosPalpitesJogo.map((tp) => `${escaparHtml(tp.usuario?.nome)}: <strong>${escaparHtml(tp.placarPrevisto)}</strong>`).join(' • ') || 'Nenhuma'}
-          </div>
         </div>
       `;
     })
     .join('');
 
-  // Ranking exclusivo daquele bolão na lateral direita (de cima para baixo — Passo 10)
+  // Ranking exclusivo daquele bolão na lateral direita (de cima para baixo — jogadores com mesma pontuação têm a mesma posição)
   const participantesAtivosOrdenados = [...(bolao.participantes || [])]
     .filter((p) => p.status === 'CONFIRMADO' || p.status === 'ACEITO')
     .sort((a, b) => Number(b.pontosTotais || 0) - Number(a.pontosTotais || 0));
 
+  const medalhasPosicao = { 1: '🥇 1º', 2: '🥈 2º', 3: '🥉 3º' };
+  let posicaoRankingBolao = 1;
+  let pontuacaoAnteriorBolao = null;
+
   const rankingBolaoLateralHtml = participantesAtivosOrdenados
-    .map((p, idx) => {
-      const medalhas = ['🥇 1º', '🥈 2º', '🥉 3º'];
-      const pos = medalhas[idx] || `${idx + 1}º`;
+    .map((p) => {
+      const pts = Number(p.pontosTotais || 0);
+      if (pontuacaoAnteriorBolao !== null && pts < pontuacaoAnteriorBolao) {
+        posicaoRankingBolao++;
+      }
+      pontuacaoAnteriorBolao = pts;
+      const pos = medalhasPosicao[posicaoRankingBolao] || `${posicaoRankingBolao}º`;
       return `
         <div class="item-ranking-bolao">
           <div>
             <strong>${pos} — ${escaparHtml(p.usuario?.nome)}</strong>
             <div style="font-size:0.75rem;color:var(--texto-secundario);">${escaparHtml(p.usuario?.email)}</div>
           </div>
-          <span class="pontos-pill">${Number(p.pontosTotais || 0)} pts</span>
+          <span class="pontos-pill">${pts} pts</span>
         </div>
       `;
     })
@@ -3067,47 +3155,19 @@ async function renderizarDetalheBolao(bolao) {
   });
 }
 
-function montarPalcoGrandePartidaBolao(bolao, partida, meuUsuarioId) {
+function montarPalcoGrandePartidaBolao(bolao, partida) {
   if (!partida) return '';
   const nomeCasa = partida.timeCasa?.nome || 'Time Mandante';
   const nomeFora = partida.timeFora?.nome || 'Time Visitante';
   const escudoCasa = partida.timeCasa?.escudoUrl || ESCUDO_PADRAO;
   const escudoFora = partida.timeFora?.escudoUrl || ESCUDO_PADRAO;
 
-  // Combinações já jogadas por outros participantes ativos nesta partida
-  const jaJogadasSet = new Set(
-    (bolao.palpites || [])
-      .filter(
-        (pal) =>
-          Number(pal.partida?.id) === Number(partida.id) &&
-          Number(pal.usuario?.id) !== Number(meuUsuarioId)
-      )
-      .map((pal) => (pal.placarPrevisto || '').toLowerCase())
-      .filter(Boolean)
-  );
-
-  const listaRiscadas = Array.from(jaJogadasSet);
-  const listaLivres = COMBINACOES_PADRAO_BOLAO.filter((c) => !jaJogadasSet.has(c));
-
   const salvo = placaresConvidadoTemp[partida.id] || '';
   const [gCasa = '', gFora = ''] = salvo ? salvo.split('x') : ['', ''];
 
   return `
     <div class="palco-grande-bolao">
-      <!-- Lado Esquerdo: Combinações já jogadas (Riscadas) -->
-      <div class="coluna-combinacoes">
-        <strong style="font-size:0.86rem;color:#fca5a5;">🚫 Combinações Já Jogadas (Riscadas)</strong>
-        <small style="font-size:0.75rem;color:var(--texto-secundario);">Estes placares já foram escolhidos nesta partida:</small>
-        <div class="grade-pills-placar">
-          ${
-            listaRiscadas.length > 0
-              ? listaRiscadas.map((c) => `<span class="pill-placar-riscado">${escaparHtml(c.replace('x', ' x '))}</span>`).join('')
-              : `<span style="font-size:0.8rem;color:var(--texto-secundario);">Nenhuma combinação ocupada ainda.</span>`
-          }
-        </div>
-      </div>
-
-      <!-- Centro: Partida Grande na Tela -->
+      <!-- Partida Grande na Tela -->
       <div class="card-central-grande">
         <span class="badge badge-aviso">PARTIDA EM DESTAQUE • #${partida.id}</span>
         <div style="display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;">
@@ -3125,18 +3185,18 @@ function montarPalcoGrandePartidaBolao(bolao, partida, meuUsuarioId) {
             <span class="nome-time">${escaparHtml(nomeFora)}</span>
           </div>
         </div>
-        <small style="color:var(--texto-secundario);">Digite nas caixinhas acima ou clique em uma combinação disponível à direita.</small>
+        <small style="color:var(--texto-secundario);">Clique em uma das 16 combinações à direita (0 a 3 x 0 a 3) ou digite manualmente nas caixinhas acima.</small>
       </div>
 
-      <!-- Lado Direito: Combinações que ainda podem ser feitas -->
+      <!-- Lado Direito: 16 Combinações (0 a 3 x 0 a 3) -->
       <div class="coluna-combinacoes">
-        <strong style="font-size:0.86rem;color:#34d399;">✅ Combinações Disponíveis</strong>
-        <small style="font-size:0.75rem;color:var(--texto-secundario);">Clique em uma combinação para preencher o placar:</small>
-        <div class="grade-pills-placar">
-          ${listaLivres
+        <strong style="font-size:0.86rem;color:#34d399;">🎯 Combinações Rápidas (0 a 3 x 0 a 3)</strong>
+        <small style="font-size:0.75rem;color:var(--texto-secundario);">Clique em um placar abaixo para preencher automaticamente:</small>
+        <div class="grade-16-combinacoes">
+          ${COMBINACOES_PADRAO_BOLAO
             .map(
               (c) =>
-                `<button type="button" class="pill-placar-livre" data-combinacao-livre="${c}">${escaparHtml(c.replace('x', ' x '))}</button>`
+                `<button type="button" class="pill-placar-livre ${salvo === c ? 'selecionado' : ''}" data-combinacao-livre="${c}">${escaparHtml(c.replace('x', ' x '))}</button>`
             )
             .join('')}
         </div>
