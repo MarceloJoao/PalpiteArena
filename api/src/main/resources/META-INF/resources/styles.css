@@ -1151,10 +1151,10 @@ body[data-modo="admin"] .apenas-visitante {
   display: flex;
 }
 
-/* Passo 8: Tela grande da partida com combinações riscadas à esquerda e disponíveis à direita */
+/* Passo 8: Tela grande da partida com as 16 combinações (0 a 3 x 0 a 3) à direita */
 .palco-grande-bolao {
   display: grid;
-  grid-template-columns: 1fr 1.6fr 1fr;
+  grid-template-columns: 1.35fr 1fr;
   gap: 16px;
   align-items: stretch;
   background: rgba(15, 23, 42, 0.78);
@@ -1162,6 +1162,18 @@ body[data-modo="admin"] .apenas-visitante {
   border-radius: 14px;
   padding: 18px;
   margin: 16px 0;
+}
+
+.grade-16-combinacoes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.pill-placar-livre.selecionado {
+  background: var(--verde-arena);
+  color: #ffffff;
+  border-color: #ffffff;
 }
 
 @media (max-width: 860px) {

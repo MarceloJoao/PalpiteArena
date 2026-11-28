@@ -98,21 +98,16 @@ class BolaoDominioTest {
     }
 
     @Test
-    void convidadoAceitaENaoPodeRepetirCombinacaoDePlacarJaJogadaNaMesmaPartida() {
+    void convidadoAceitaEPodeEscolherMesmoPlacarJaJogadoPorOutroParticipante() {
         Bolao bolao = criarBolaoPadraoConfigurado(new BigDecimal("50.00"));
         bolao.aceitarConvite(2L);
 
         assertEquals(new BigDecimal("150.00"), convidado1.getSaldo());
         assertEquals(new BigDecimal("50.00"), convidado1.getSaldoRetido());
 
-        // Criador já jogou 2x1 no jogo 101 -> Convidado 1 não pode repetir 2x1 no jogo 101
-        Map<Long, String> placaresRepetidos = Map.of(101L, "2x1", 102L, "0x0");
-        assertThrows(IllegalStateException.class,
-                () -> bolao.confirmarPlacaresConvidado(2L, placaresRepetidos));
-
-        // Convidado 1 escolhe combinações disponíveis (1x2 e 0x0) -> sucesso!
-        Map<Long, String> placaresLivres = Map.of(101L, "1x2", 102L, "0x0");
-        bolao.confirmarPlacaresConvidado(2L, placaresLivres);
+        // Mesmo que o criador já tenha jogado 2x1 no jogo 101, o convidado também pode escolher 2x1
+        Map<Long, String> placaresIguais = Map.of(101L, "2x1", 102L, "1x0");
+        bolao.confirmarPlacaresConvidado(2L, placaresIguais);
         assertEquals(StatusParticipanteBolao.CONFIRMADO, bolao.buscarParticipante(2L).getStatus());
     }
 
@@ -180,5 +175,59 @@ class BolaoDominioTest {
         assertEquals(new BigDecimal("30.00"), carteiraCasa.getSaldoTotal());
         // Criador tinha 100 livres + 270 do prêmio = 370,00
         assertEquals(new BigDecimal("370.00"), criador.getSaldo());
+    }
+
+    @Test
+    void empateEmPrimeiroLugarDividePremioDe90PorCentoIgualmenteEntreOsVencedores() {
+        // 3 participantes x R$ 100,00 = Pote Total R$ 300,00 -> Casa leva 10% (R$ 30,00) e 2 vencedores empatados dividem R$ 270,00 (R$ 135,00 cada)
+        Bolao bolao = criarBolaoPadraoConfigurado(new BigDecimal("100.00"));
+
+        bolao.aceitarConvite(2L);
+        // Convidado 1 escolhe exatamente os mesmos placares do Criador (2x1 e 1x0)
+        bolao.confirmarPlacaresConvidado(2L, Map.of(101L, "2x1", 102L, "1x0"));
+
+        bolao.aceitarConvite(3L);
+        // Convidado 2 erra os dois (0x0 e 0x1)
+        bolao.confirmarPlacaresConvidado(3L, Map.of(101L, "0x0", 102L, "0x1"));
+
+        jogo1.setPlacar("2x1");
+        jogo1.setStatus(StatusPartida.FINALIZADA);
+        jogo2.setPlacar("1x0");
+        jogo2.setStatus(StatusPartida.FINALIZADA);
+
+        bolao.apurarPontosELiquidarSeFinalizado(carteiraCasa);
+
+        assertEquals(StatusBolao.FINALIZADO, bolao.getStatus());
+        assertEquals(6, bolao.buscarParticipante(1L).getPontosTotais());
+        assertEquals(6, bolao.buscarParticipante(2L).getPontosTotais());
+        assertEquals(0, bolao.buscarParticipante(3L).getPontosTotais());
+        assertEquals(new BigDecimal("30.00"), bolao.getComissaoCasa());
+        assertEquals(new BigDecimal("135.00"), bolao.getPremioVencedor());
+        assertEquals(new BigDecimal("235.00"), criador.getSaldo());
+        assertEquals(new BigDecimal("235.00"), convidado1.getSaldo());
+        assertEquals(new BigDecimal("100.00"), convidado2.getSaldo());
+    }
+
+    @Test
+    void quandoTodosEmpatamEmZeroPontosNinguemGanhaECasaCobra2Virgula5PorCentoDeCada() {
+        Bolao bolao = criarBolaoPadraoConfigurado(new BigDecimal("100.00"));
+
+        bolao.aceitarConvite(2L);
+        bolao.confirmarPlacaresConvidado(2L, Map.of(101L, "2x1", 102L, "1x0"));
+
+        // Placar final que ninguém acertou (0x0 e 0x0) -> todos ficam com 0 pontos
+        jogo1.setPlacar("0x0");
+        jogo1.setStatus(StatusPartida.FINALIZADA);
+        jogo2.setPlacar("0x0");
+        jogo2.setStatus(StatusPartida.FINALIZADA);
+
+        bolao.apurarPontosELiquidarSeFinalizado(carteiraCasa);
+
+        assertEquals(StatusBolao.FINALIZADO, bolao.getStatus());
+        assertEquals(null, bolao.getVencedor());
+        // 2,5% de R$ 100,00 = R$ 2,50 de cada (R$ 5,00 para a Casa) e R$ 97,50 devolvidos para cada
+        assertEquals(new BigDecimal("5.00"), bolao.getComissaoCasa());
+        assertEquals(new BigDecimal("197.50"), criador.getSaldo());
+        assertEquals(new BigDecimal("197.50"), convidado1.getSaldo());
     }
 }

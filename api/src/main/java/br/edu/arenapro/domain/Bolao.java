@@ -40,6 +40,7 @@ public class Bolao {
 
     private static final BigDecimal TAXA_MULTA_DESISTENCIA = new BigDecimal("0.20");
     private static final BigDecimal TAXA_COMISSAO_CASA_BOLAO = new BigDecimal("0.10");
+    private static final BigDecimal TAXA_SEM_VENCEDOR_CADA = new BigDecimal("0.025");
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -300,30 +301,14 @@ public class Bolao {
             throw new IllegalArgumentException("Informe os placares de todas as partidas do bolão.");
         }
 
-        // Valida todas as partidas do bolão antes de gravar
+        // Valida todas as partidas do bolão antes de gravar (repetição de placar entre participantes é permitida)
         for (BolaoPartida bp : this.partidas) {
             Partida partida = bp.getPartida();
             String placarBruto = placaresPorPartida.get(partida.getId());
             if (placarBruto == null || placarBruto.isBlank()) {
                 throw new IllegalArgumentException("Você esqueceu de marcar o placar de: " + partida.getDescricao());
             }
-            String placarNorm = normalizarPlacar(placarBruto);
-
-            // Verifica se outro participante ativo já escolheu essa mesma combinação nessa partida
-            boolean combinacaoJaJogada = this.palpites.stream()
-                    .filter(p -> p.getPartida() != null && Objects.equals(p.getPartida().getId(), partida.getId()))
-                    .filter(p -> p.getUsuario() != null && !Objects.equals(p.getUsuario().getId(), usuarioId))
-                    .filter(p -> {
-                        BolaoParticipante dono = buscarParticipante(p.getUsuario().getId());
-                        return dono != null && dono.estaAtivoNoBolao();
-                    })
-                    .anyMatch(p -> placarNorm.equalsIgnoreCase(p.getPlacarPrevisto()));
-
-            if (combinacaoJaJogada) {
-                throw new IllegalStateException(
-                        "A combinação " + placarNorm + " já foi jogada por outro participante em " + partida.getDescricao()
-                                + ". Escolha uma das combinações disponíveis!");
-            }
+            normalizarPlacar(placarBruto);
         }
 
         // Remove palpites anteriores deste usuário neste bolão (caso esteja atualizando) e grava os novos
@@ -489,6 +474,41 @@ public class Bolao {
             return;
         }
 
+        int maiorPontuacao = ativos.stream()
+                .mapToInt(BolaoParticipante::getPontosTotais)
+                .max()
+                .orElse(0);
+
+        List<BolaoParticipante> primeirosColocados = ativos.stream()
+                .filter(p -> p.getPontosTotais() == maiorPontuacao)
+                .toList();
+
+        boolean ninguemGanhou = maiorPontuacao <= 0 || primeirosColocados.size() == ativos.size();
+
+        if (ninguemGanhou) {
+            // Quando todos empatam em 0 pontos (ou todos terminam empatados sem perdedor):
+            // ninguém ganha, a Casa cobra 2,5% de cada um e devolve 97,5% para cada participante
+            BigDecimal comissaoTotalSemVencedor = BigDecimal.ZERO;
+            for (BolaoParticipante part : ativos) {
+                BigDecimal retido = part.getValorRetido();
+                if (part.getUsuario() != null && retido.compareTo(BigDecimal.ZERO) > 0) {
+                    part.getUsuario().consumirSaldoRetido(retido);
+                    BigDecimal taxa25 = retido.multiply(TAXA_SEM_VENCEDOR_CADA).setScale(2, RoundingMode.HALF_UP);
+                    BigDecimal devolucao975 = retido.subtract(taxa25).setScale(2, RoundingMode.HALF_UP);
+                    part.getUsuario().creditarSaldo(devolucao975);
+                    comissaoTotalSemVencedor = comissaoTotalSemVencedor.add(taxa25);
+                }
+            }
+            if (carteiraCasa != null && comissaoTotalSemVencedor.compareTo(BigDecimal.ZERO) > 0) {
+                carteiraCasa.registrarComissao(comissaoTotalSemVencedor);
+            }
+            this.vencedor = null;
+            this.comissaoCasa = comissaoTotalSemVencedor;
+            this.premioVencedor = new BigDecimal("0.00");
+            this.status = StatusBolao.FINALIZADO;
+            return;
+        }
+
         BigDecimal poteTotal = BigDecimal.ZERO;
         for (BolaoParticipante part : ativos) {
             BigDecimal retido = part.getValorRetido();
@@ -498,21 +518,24 @@ public class Bolao {
             }
         }
 
-        // Regra 14: A casa ganha 10% do valor total do bolão e o vencedor leva 90%
+        // Regra 14 (Opção B): A Casa tira 10% do pote total do bolão e os 90% restantes são divididos igualmente entre os 1º colocados
         BigDecimal comissao10 = poteTotal.multiply(TAXA_COMISSAO_CASA_BOLAO).setScale(2, RoundingMode.HALF_UP);
         BigDecimal premio90 = poteTotal.subtract(comissao10).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal premioPorVencedor = premio90.divide(
+                BigDecimal.valueOf(primeirosColocados.size()), 2, RoundingMode.DOWN);
 
-        BolaoParticipante campeao = ativos.get(0);
-        if (campeao.getUsuario() != null && premio90.compareTo(BigDecimal.ZERO) > 0) {
-            campeao.getUsuario().creditarSaldo(premio90);
+        for (BolaoParticipante campeao : primeirosColocados) {
+            if (campeao.getUsuario() != null && premioPorVencedor.compareTo(BigDecimal.ZERO) > 0) {
+                campeao.getUsuario().creditarSaldo(premioPorVencedor);
+            }
         }
         if (carteiraCasa != null && comissao10.compareTo(BigDecimal.ZERO) > 0) {
             carteiraCasa.registrarComissao(comissao10);
         }
 
-        this.vencedor = campeao.getUsuario();
+        this.vencedor = primeirosColocados.get(0).getUsuario();
         this.comissaoCasa = comissao10;
-        this.premioVencedor = premio90;
+        this.premioVencedor = premioPorVencedor;
         this.status = StatusBolao.FINALIZADO;
     }
 
