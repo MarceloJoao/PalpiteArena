@@ -437,30 +437,176 @@ function preencherDatasHojeEAmanha() {
   return { hoje, amanha };
 }
 
-async function buscarEventosDiaTheSportsDB(dataIso) {
-  if (!dataIso) return [];
-  const url = `${URL_THESPORTSDB_DIA}?d=${encodeURIComponent(dataIso)}&s=Soccer`;
-  const resposta = await fetch(url);
-  if (!resposta.ok) {
-    throw new Error(`Falha ao consultar TheSportsDB (${resposta.status})`);
+// 4 Campeonatos exibidos no Mural de Partidas (faixa de 6 dias: hoje-2 até hoje+3)
+const CAMPEONATOS_MURAL = [
+  { id: '4351', nome: 'Brasileirão Série A', temporada: '2026', rodadas: [36, 37, 38], ordemLiga: 1 },
+  { id: '4404', nome: 'Brasileirão Série B', temporada: '2026', rodadas: [0, 38], ordemLiga: 2 },
+  { id: '4328', nome: 'Premier League', temporada: '2026-2027', rodadas: [12, 13], ordemLiga: 3 },
+  { id: '4335', nome: 'La Liga', temporada: '2026-2027', rodadas: [14, 15], ordemLiga: 4 },
+];
+
+const TIMES_FORA_4_CAMPEONATOS = new Set([
+  'samgurali tskhaltubo',
+  'torpedo kutaisi',
+  'rustavi',
+  'meshakhte tkibuli',
+  'aragvi dusheti',
+  'merani martvili',
+  'gareji',
+  'samtredia',
+  'dinamo batumi',
+  'dila gori',
+  'buxoro',
+  "mash'al mubarek",
+  'bodø/glimt',
+  'kfum-kameratene oslo',
+  'rosenborg',
+  'molde',
+  'colo-colo',
+  'deportes la serena',
+]);
+
+let paginaAtualMural = 1;
+
+function extrairDiaLocalYYYYMMDD(dataIso) {
+  if (!dataIso) return '';
+  const str = String(dataIso).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    return str.slice(0, 10);
   }
-  const dados = await resposta.json();
-  return Array.isArray(dados.events) ? dados.events : [];
+  const d = new Date(str);
+  if (Number.isNaN(d.getTime())) return '';
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${ano}-${mes}-${dia}`;
+}
+
+/**
+ * Ordem de prioridade dos 6 dias no Mural (exemplo se hoje é dia 27):
+ * 1º: dia atual (27) | 2º: +1 (28) | 3º: +2 (29) | 4º: +3 (30) | 5º: -1 (26) | 6º: -2 (25)
+ * Devolve 99 se estiver fora da faixa de 6 dias.
+ */
+function obterPrioridadeDiaMural(dataIso) {
+  const dia = extrairDiaLocalYYYYMMDD(dataIso);
+  if (!dia) return 99;
+  if (dia === obterDataLocalFormatada(0)) return 1;
+  if (dia === obterDataLocalFormatada(1)) return 2;
+  if (dia === obterDataLocalFormatada(2)) return 3;
+  if (dia === obterDataLocalFormatada(3)) return 4;
+  if (dia === obterDataLocalFormatada(-1)) return 5;
+  if (dia === obterDataLocalFormatada(-2)) return 6;
+  return 99;
+}
+
+async function buscarRodadaCampeonatoTheSportsDB(idLiga, rodada, temporada) {
+  const url = `https://www.thesportsdb.com/api/v1/json/123/eventsround.php?id=${encodeURIComponent(idLiga)}&r=${encodeURIComponent(rodada)}&s=${encodeURIComponent(temporada)}`;
+  try {
+    const resp = await fetch(url);
+    if (!resp.ok) return [];
+    const dados = await resp.json();
+    return Array.isArray(dados?.events) ? dados.events : [];
+  } catch {
+    return [];
+  }
+}
+
+async function buscarEventos4CampeonatosFaixa6Dias() {
+  const CHAVE_CACHE_RODADAS = 'palpitearena_grade_4campeonatos_v2';
+  const hojeRef = obterDataLocalFormatada(0);
+  try {
+    const cacheBruto = sessionStorage.getItem(CHAVE_CACHE_RODADAS);
+    if (cacheBruto) {
+      const cache = JSON.parse(cacheBruto);
+      if (cache && cache.dataRef === hojeRef && Date.now() - cache.ts < 10 * 60 * 1000 && Array.isArray(cache.eventos) && cache.eventos.length > 0) {
+        return cache.eventos;
+      }
+    }
+  } catch {
+    // Ignora erro de sessionStorage
+  }
+
+  const chamadas = [];
+  CAMPEONATOS_MURAL.forEach((camp) => {
+    camp.rodadas.forEach((rodada) => {
+      chamadas.push(
+        buscarRodadaCampeonatoTheSportsDB(camp.id, rodada, camp.temporada).then((lista) =>
+          lista.map((ev) => ({ ...ev, _ordemLiga: camp.ordemLiga, _nomeLiga: camp.nome }))
+        )
+      );
+    });
+  });
+
+  const resultados = await Promise.all(chamadas);
+  const todos = resultados.flat();
+
+  // Filtra apenas eventos cuja data (já convertida para o fuso de Brasília) esteja dentro da faixa de 6 dias (hoje-2 até hoje+3)
+  const dentroFaixa6Dias = todos.filter((ev) => {
+    if (!ev || !ev.idEvent || !ev.strHomeTeam || !ev.strAwayTeam) return false;
+    const { dataComparacao } = converterUtcTheSportsDBParaBrasilia(ev);
+    return obterPrioridadeDiaMural(dataComparacao) <= 6;
+  });
+
+  if (dentroFaixa6Dias.length > 0) {
+    try {
+      sessionStorage.setItem(
+        CHAVE_CACHE_RODADAS,
+        JSON.stringify({ dataRef: hojeRef, ts: Date.now(), eventos: dentroFaixa6Dias })
+      );
+    } catch {
+      // Ignora erro de quota
+    }
+  }
+  return dentroFaixa6Dias;
+}
+
+function totalGolsPlacar(placar) {
+  if (!placar || typeof placar !== 'string') return -1;
+  const partes = placar.trim().toLowerCase().split('x');
+  if (partes.length !== 2) return -1;
+  const c = Number(partes[0]);
+  const f = Number(partes[1]);
+  return Number.isNaN(c) || Number.isNaN(f) ? -1 : c + f;
 }
 
 async function enriquecerPlacaresTempoRealLookup(eventos) {
   if (!Array.isArray(eventos) || eventos.length === 0) return eventos;
+  const agoraMs = Date.now();
   const enriquecidos = await Promise.all(
     eventos.map(async (ev) => {
-      if (!ev || !ev.idEvent || ev.strStatus === 'FT') return ev;
+      if (!ev || !ev.idEvent || ev.strStatus === 'FT' || ev.strStatus === 'AOT') return ev;
+      // Só consulta lookupevent.php para jogos cujo horário já iniciou (ou começou nas últimas 24h)
+      // Isso evita o bloqueio Error 1015 (rate limit do Cloudflare) da chave gratuita 123 da TheSportsDB
+      const { isoLocal } = converterUtcTheSportsDBParaBrasilia(ev);
+      const inicioMs = new Date(isoLocal).getTime();
+      const jaIniciou = !Number.isNaN(inicioMs) && inicioMs <= agoraMs + 15 * 60 * 1000;
+      if (!jaIniciou) return ev;
+
       try {
         const resp = await fetch(
-          `https://www.thesportsdb.com/api/v1/json/123/lookupevent.php?id=${encodeURIComponent(ev.idEvent)}&_t=${Date.now()}`
+          `https://www.thesportsdb.com/api/v1/json/123/lookupevent.php?id=${encodeURIComponent(ev.idEvent)}`
         );
         if (!resp.ok) return ev;
         const dados = await resp.json();
         const atualizado = Array.isArray(dados?.events) ? dados.events[0] : null;
-        return atualizado ? { ...ev, ...atualizado } : ev;
+        if (!atualizado) return ev;
+
+        // Nunca deixa um cache atrasado regredir o placar que já tinha mais gols (ex.: 1x0 voltar para 0x0)
+        const placarAntes = eventoExternoTemPlacar(ev)
+          ? `${String(ev.intHomeScore).trim()}x${String(ev.intAwayScore).trim()}`
+          : null;
+        const placarNovo = eventoExternoTemPlacar(atualizado)
+          ? `${String(atualizado.intHomeScore).trim()}x${String(atualizado.intAwayScore).trim()}`
+          : null;
+        if (placarAntes && (!placarNovo || totalGolsPlacar(placarNovo) < totalGolsPlacar(placarAntes))) {
+          return {
+            ...ev,
+            ...atualizado,
+            intHomeScore: ev.intHomeScore,
+            intAwayScore: ev.intAwayScore,
+          };
+        }
+        return { ...ev, ...atualizado };
       } catch {
         return ev;
       }
@@ -469,49 +615,58 @@ async function enriquecerPlacaresTempoRealLookup(eventos) {
   return enriquecidos;
 }
 
-async function carregarPartidasExternasHojeEAmanha() {
-  const container = document.getElementById('lista-partidas-externas');
-  const data1 = document.getElementById('filtro-data-hoje')?.value || obterDataLocalFormatada(0);
-  const data2 = document.getElementById('filtro-data-amanha')?.value || obterDataLocalFormatada(1);
-
-  if (container) {
-    container.innerHTML = `<p class="texto-vazio">⏳ Consultando partidas de <strong>${data1}</strong> e <strong>${data2}</strong> na TheSportsDB...</p>`;
+async function atualizarSomentePlacaresAoVivo() {
+  if (!Array.isArray(partidasExternasCache) || partidasExternasCache.length === 0) {
+    return carregarPartidasExternasHojeEAmanha();
   }
+  partidasExternasCache = await enriquecerPlacaresTempoRealLookup(partidasExternasCache);
+  return partidasExternasCache;
+}
 
+async function carregarPartidasExternasHojeEAmanha() {
   try {
-    const data3 = obterDataLocalFormatada(2);
-    const data4 = obterDataLocalFormatada(3);
-    const [eventosDia1, eventosDia2, eventosDia3, eventosDia4] = await Promise.all([
-      buscarEventosDiaTheSportsDB(data1),
-      data2 && data2 !== data1 ? buscarEventosDiaTheSportsDB(data2) : Promise.resolve([]),
-      buscarEventosDiaTheSportsDB(data3),
-      buscarEventosDiaTheSportsDB(data4),
-    ]);
+    const eventosFaixa6Dias = await buscarEventos4CampeonatosFaixa6Dias();
+
+    const mapaAnterior = new Map();
+    (partidasExternasCache || []).forEach((ant) => {
+      if (ant && ant.idEvent) mapaAnterior.set(ant.idEvent, ant);
+    });
 
     const mapaUnico = new Map();
-    [...eventosDia1, ...eventosDia2, ...eventosDia3, ...eventosDia4].forEach((ev) => {
+    eventosFaixa6Dias.forEach((ev) => {
       if (ev && ev.idEvent && ev.strHomeTeam && ev.strAwayTeam) {
+        const ant = mapaAnterior.get(ev.idEvent);
+        if (ant && eventoExternoTemPlacar(ant)) {
+          const pAnt = `${String(ant.intHomeScore).trim()}x${String(ant.intAwayScore).trim()}`;
+          const pNovo = eventoExternoTemPlacar(ev)
+            ? `${String(ev.intHomeScore).trim()}x${String(ev.intAwayScore).trim()}`
+            : null;
+          if (!pNovo || totalGolsPlacar(pNovo) < totalGolsPlacar(pAnt)) {
+            ev = { ...ev, intHomeScore: ant.intHomeScore, intAwayScore: ant.intAwayScore };
+          }
+        }
         mapaUnico.set(ev.idEvent, ev);
       }
     });
 
     const lista = Array.from(mapaUnico.values());
     lista.sort((a, b) => {
-      const aBrasil = a.strCountry === 'Brazil' || (a.strLeague || '').includes('Brazil') ? 0 : 1;
-      const bBrasil = b.strCountry === 'Brazil' || (b.strLeague || '').includes('Brazil') ? 0 : 1;
-      if (aBrasil !== bBrasil) return aBrasil - bBrasil;
-      return String(a.dateEvent || '').localeCompare(String(b.dateEvent || ''));
+      const convA = converterUtcTheSportsDBParaBrasilia(a);
+      const convB = converterUtcTheSportsDBParaBrasilia(b);
+      const prioA = obterPrioridadeDiaMural(convA.dataComparacao);
+      const prioB = obterPrioridadeDiaMural(convB.dataComparacao);
+      if (prioA !== prioB) return prioA - prioB;
+      const ligaA = a._ordemLiga || 9;
+      const ligaB = b._ordemLiga || 9;
+      if (ligaA !== ligaB) return ligaA - ligaB;
+      return String(convA.isoLocal || '').localeCompare(String(convB.isoLocal || ''));
     });
 
-    // Mantém as 9 partidas principais e consulta lookupevent.php sem cache para placar em tempo real
-    const top9 = await enriquecerPlacaresTempoRealLookup(lista.slice(0, LIMITE_MURAL_PARTIDAS));
-    partidasExternasCache = top9;
-    renderizarPartidasExternas(partidasExternasCache, data1);
+    // Consulta lookupevent.php apenas nos jogos que já começaram e ainda não fecharam
+    const enriquecidos = await enriquecerPlacaresTempoRealLookup(lista);
+    partidasExternasCache = enriquecidos;
     return partidasExternasCache;
-  } catch (erro) {
-    if (container) {
-      container.innerHTML = `<p class="texto-vazio">❌ Erro ao consultar a TheSportsDB: ${escaparHtml(erro.message)}</p>`;
-    }
+  } catch {
     return [];
   }
 }
@@ -688,7 +843,10 @@ function obterEstadoTempoRealPartida(p) {
 
   let placarBruto = p.placar && String(p.placar).trim() !== '' ? String(p.placar).trim() : null;
   if (!finalizada && eventoExternoTemPlacar(evExterno)) {
-    placarBruto = `${String(evExterno.intHomeScore).trim()}x${String(evExterno.intAwayScore).trim()}`;
+    const placarExt = `${String(evExterno.intHomeScore).trim()}x${String(evExterno.intAwayScore).trim()}`;
+    if (!placarBruto || totalGolsPlacar(placarExt) >= totalGolsPlacar(placarBruto)) {
+      placarBruto = placarExt;
+    }
   }
 
   const horarioJogoMs = p.data ? new Date(p.data).getTime() : NaN;
@@ -703,13 +861,20 @@ function obterEstadoTempoRealPartida(p) {
   return { placarExibicao, aoVivo, finalizada, placarBruto };
 }
 
-async function importarEventoExternoParaArena(ev, cacheContexto = null) {
+async function importarEventoExternoParaArena(ev, cacheContexto = null, somenteAtualizarExistente = false) {
   const timesAtuais = cacheContexto?.times || (await requisicaoApi('/times?pagina=0&tamanho=100'));
   const partidasAtuais = cacheContexto?.partidas || (await requisicaoApi('/partidas?pagina=0&tamanho=100'));
 
   const mapaTimes = cacheContexto?.mapaTimes || new Map();
   if (mapaTimes.size === 0 && Array.isArray(timesAtuais)) {
     timesAtuais.forEach((t) => mapaTimes.set(t.nome.trim().toLowerCase(), t));
+  }
+
+  const partidaExistentePorNome = (partidasAtuais || []).find(
+    (p) => chaveConfronto(p.timeCasa?.nome, p.timeFora?.nome) === chaveConfronto(ev.strHomeTeam, ev.strAwayTeam)
+  );
+  if (somenteAtualizarExistente && !partidaExistentePorNome) {
+    return null;
   }
 
   const timeCasa = await garantirTimeNoBanco(ev.strHomeTeam, ev.strHomeTeamBadge, mapaTimes);
@@ -728,13 +893,17 @@ async function importarEventoExternoParaArena(ev, cacheContexto = null) {
     : null;
   const statusReal = jaFinalizada ? 'FINALIZADA' : 'AGENDADA';
 
-  const partidaExistente = (partidasAtuais || []).find(
-    (p) => p.timeCasa?.id === timeCasa.id && p.timeFora?.id === timeFora.id
-  );
+  const partidaExistente =
+    partidaExistentePorNome ||
+    (partidasAtuais || []).find((p) => p.timeCasa?.id === timeCasa.id && p.timeFora?.id === timeFora.id);
   if (partidaExistente) {
     const mudouStatus = jaFinalizada && partidaExistente.status !== 'FINALIZADA';
-    const mudouPlacar = placarReal && partidaExistente.placar !== placarReal && partidaExistente.status !== 'FINALIZADA';
-    if (mudouStatus || mudouPlacar) {
+    const placarAvancou =
+      placarReal &&
+      partidaExistente.placar !== placarReal &&
+      partidaExistente.status !== 'FINALIZADA' &&
+      (jaFinalizada || totalGolsPlacar(placarReal) >= totalGolsPlacar(partidaExistente.placar));
+    if (mudouStatus || placarAvancou) {
       const atualizada = await requisicaoApi(`/partidas/${partidaExistente.id}`, {
         method: 'PUT',
         body: JSON.stringify({
@@ -748,6 +917,10 @@ async function importarEventoExternoParaArena(ev, cacheContexto = null) {
       Object.assign(partidaExistente, atualizada);
       return atualizada;
     }
+    return null;
+  }
+
+  if (somenteAtualizarExistente) {
     return null;
   }
 
@@ -778,8 +951,9 @@ async function importarTodasPartidasExternas(silencioso = false) {
     (times || []).forEach((t) => mapaTimes.set(t.nome.trim().toLowerCase(), t));
 
     let importadas = 0;
-    for (const ev of partidasExternasCache.slice(0, LIMITE_MURAL_PARTIDAS)) {
-      const criada = await importarEventoExternoParaArena(ev, { times, partidas, mapaTimes });
+    for (let i = 0; i < partidasExternasCache.length; i++) {
+      const ev = partidasExternasCache[i];
+      const criada = await importarEventoExternoParaArena(ev, { times, partidas, mapaTimes }, false);
       if (criada) importadas++;
     }
 
@@ -795,7 +969,7 @@ async function importarTodasPartidasExternas(silencioso = false) {
 }
 
 /* ==========================================================================
-   4. MURAL DE 9 PARTIDAS & CARD DE DESAFIO X1
+   4. MURAL DE PARTIDAS (4 CAMPEONATOS, FAIXA DE 6 DIAS, PAGINAÇÃO 9 POR PÁGINA)
    ========================================================================== */
 
 function extrairDataEHoraArena(dataIso) {
@@ -820,41 +994,64 @@ function extrairDataEHoraArena(dataIso) {
 }
 
 /**
- * Monta o Mural com 9 partidas: primeiro os jogos de Hoje/Amanhã vindos da TheSportsDB
- * (já sincronizados no banco), depois completa com as demais partidas mais próximas da data atual.
+ * Seleciona e ordena todas as partidas dos 4 campeonatos (4351, 4404, 4328, 4335) na faixa de 6 dias:
+ * Ordem de prioridade dos dias: 1º Hoje (0), 2º Amanhã (+1), 3º (+2), 4º (+3), 5º Ontem (-1), 6º Anteontem (-2).
  */
 function selecionarPartidasDoMural(partidasBanco) {
-  const chavesExternas = new Set(
-    partidasExternasCache.map((ev) => chaveConfronto(ev.strHomeTeam, ev.strAwayTeam))
-  );
-  const porData = (a, b) => String(a.data || '').localeCompare(String(b.data || ''));
-  const destaque = partidasBanco
-    .filter((p) => chavesExternas.has(chaveConfronto(p.timeCasa?.nome, p.timeFora?.nome)))
-    .sort(porData);
-  const agora = Date.now();
-  const restantes = partidasBanco
-    .filter((p) => !chavesExternas.has(chaveConfronto(p.timeCasa?.nome, p.timeFora?.nome)))
-    .sort((a, b) => Math.abs(new Date(a.data) - agora) - Math.abs(new Date(b.data) - agora));
-  return [...destaque, ...restantes].slice(0, LIMITE_MURAL_PARTIDAS);
+  const mapaOrdemExterna = new Map();
+  partidasExternasCache.forEach((ev, idx) => {
+    mapaOrdemExterna.set(chaveConfronto(ev.strHomeTeam, ev.strAwayTeam), {
+      idx,
+      ordemLiga: ev._ordemLiga || 5,
+    });
+  });
+
+  const filtradas = (partidasBanco || []).filter((p) => {
+    const casaNorm = String(p.timeCasa?.nome || '').trim().toLowerCase();
+    const foraNorm = String(p.timeFora?.nome || '').trim().toLowerCase();
+    if (TIMES_FORA_4_CAMPEONATOS.has(casaNorm) || TIMES_FORA_4_CAMPEONATOS.has(foraNorm)) {
+      return false;
+    }
+    const prioDia = obterPrioridadeDiaMural(p.data);
+    if (prioDia > 6) {
+      return false;
+    }
+    if (mapaOrdemExterna.size > 0) {
+      return mapaOrdemExterna.has(chaveConfronto(p.timeCasa?.nome, p.timeFora?.nome));
+    }
+    return true;
+  });
+
+  filtradas.sort((a, b) => {
+    const prioA = obterPrioridadeDiaMural(a.data);
+    const prioB = obterPrioridadeDiaMural(b.data);
+    if (prioA !== prioB) return prioA - prioB;
+
+    const infoA = mapaOrdemExterna.get(chaveConfronto(a.timeCasa?.nome, a.timeFora?.nome));
+    const infoB = mapaOrdemExterna.get(chaveConfronto(b.timeCasa?.nome, b.timeFora?.nome));
+    const ligaA = infoA?.ordemLiga || 5;
+    const ligaB = infoB?.ordemLiga || 5;
+    if (ligaA !== ligaB) return ligaA - ligaB;
+
+    return String(a.data || '').localeCompare(String(b.data || ''));
+  });
+
+  return filtradas;
 }
 
 async function carregarPartidasArena() {
   const container = document.getElementById('lista-partidas-arena');
   if (!container) return [];
 
-  const filtroStatus = document.getElementById('filtro-status-arena')?.value || '';
-  const queryStatus = filtroStatus ? `&status=${encodeURIComponent(filtroStatus)}` : '';
-
   try {
-    const partidas = await requisicaoApi(`/partidas?pagina=0&tamanho=100${queryStatus}`);
-    const lista9 = selecionarPartidasDoMural(partidas || []);
-    partidasArenaCache = lista9;
-    renderizarPartidasArena(lista9);
-    return lista9;
+    const partidas = await requisicaoApi('/partidas?pagina=0&tamanho=100');
+    const listaMural = selecionarPartidasDoMural(partidas || []);
+    partidasArenaCache = listaMural;
+    renderizarPartidasArena(listaMural);
+    return listaMural;
   } catch {
-    // Se a API Quarkus estiver offline, exibe os 9 cards direto da TheSportsDB como visualização
     if (partidasExternasCache.length > 0) {
-      const simuladas = partidasExternasCache.slice(0, LIMITE_MURAL_PARTIDAS).map((ev, i) => {
+      const simuladas = partidasExternasCache.map((ev, i) => {
         const { isoLocal } = converterUtcTheSportsDBParaBrasilia(ev);
         return {
           id: i + 1,
@@ -869,24 +1066,82 @@ async function carregarPartidasArena() {
       partidasArenaCache = simuladas;
       renderizarPartidasArena(simuladas);
     } else {
-      container.innerHTML = `<p class="texto-vazio">Conecte a API Quarkus na porta 8080 para carregar as 9 partidas do Mural.</p>`;
+      container.innerHTML = `<p class="texto-vazio">Conecte a API Quarkus na porta 8080 para carregar as partidas do Mural.</p>`;
     }
     return [];
   }
+}
+
+function renderizarControlesPaginacaoMural(totalItens, totalPaginas) {
+  const topo = document.getElementById('paginacao-mural-topo');
+  const rodape = document.getElementById('paginacao-mural-rodape');
+
+  if (totalItens === 0 || totalPaginas <= 1) {
+    if (topo) topo.innerHTML = '';
+    if (rodape) rodape.innerHTML = '';
+    return;
+  }
+
+  const html = `
+    <button type="button" class="btn-seta-pagina btn-mural-anterior" ${paginaAtualMural <= 1 ? 'disabled' : ''} title="Página anterior">
+      ◀
+    </button>
+    <span class="indicador-pagina-mural">Página ${paginaAtualMural} de ${totalPaginas}</span>
+    <button type="button" class="btn-seta-pagina btn-mural-proxima" ${paginaAtualMural >= totalPaginas ? 'disabled' : ''} title="Próxima página">
+      ▶
+    </button>
+  `;
+
+  if (topo) topo.innerHTML = html;
+  if (rodape) rodape.innerHTML = html;
+
+  document.querySelectorAll('.btn-mural-anterior').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (paginaAtualMural > 1) {
+        paginaAtualMural--;
+        renderizarPartidasArena(partidasArenaCache);
+      }
+    });
+  });
+
+  document.querySelectorAll('.btn-mural-proxima').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (paginaAtualMural < totalPaginas) {
+        paginaAtualMural++;
+        renderizarPartidasArena(partidasArenaCache);
+      }
+    });
+  });
 }
 
 function renderizarPartidasArena(partidas) {
   const container = document.getElementById('lista-partidas-arena');
   if (!container) return;
 
-  if (!partidas || partidas.length === 0) {
+  const filtro = document.getElementById('filtro-status-arena')?.value || 'TODAS';
+  const filtradas = (partidas || []).filter((p) => {
+    const estado = obterEstadoTempoRealPartida(p);
+    if (filtro === 'EM_ANDAMENTO') return estado.aoVivo;
+    if (filtro === 'ENCERRADAS') return estado.finalizada;
+    return true;
+  });
+
+  if (filtradas.length === 0) {
+    renderizarControlesPaginacaoMural(0, 1);
     container.innerHTML = `<p class="texto-vazio">Nenhuma partida disponível no Mural com este filtro.</p>`;
     return;
   }
 
-  const admin = ehAdmin();
+  const totalPaginas = Math.max(1, Math.ceil(filtradas.length / LIMITE_MURAL_PARTIDAS));
+  if (paginaAtualMural > totalPaginas) paginaAtualMural = totalPaginas;
+  if (paginaAtualMural < 1) paginaAtualMural = 1;
 
-  container.innerHTML = partidas
+  const inicio = (paginaAtualMural - 1) * LIMITE_MURAL_PARTIDAS;
+  const partidasPagina = filtradas.slice(inicio, inicio + LIMITE_MURAL_PARTIDAS);
+
+  renderizarControlesPaginacaoMural(filtradas.length, totalPaginas);
+
+  container.innerHTML = partidasPagina
     .map((p) => {
       const nomeCasa = p.timeCasa?.nome || 'Time Casa';
       const nomeFora = p.timeFora?.nome || 'Time Fora';
@@ -901,35 +1156,22 @@ function renderizarPartidasArena(partidas) {
         ? `<span class="badge badge-info">🔴 AO VIVO (${escaparHtml(placarExibicao)})</span>`
         : `<span class="badge badge-aviso">⏳ ABERTA PARA DESAFIO</span>`;
 
-      const botaoAcao = p.somenteLeituraExterna && !finalizada
-        ? `<div class="aviso-partida-encerrada">⚠️ API offline — ligue o sistema (docker compose up -d) para desafiar nesta partida</div>`
-        : !finalizada
-        ? `
-          <button
-            type="button"
-            class="btn btn-primario btn-bloco btn-abrir-desafio"
-            data-partida-id="${p.id}"
-          >
-            ⚔️ Desafiar Usuário nesta Partida
-          </button>
-          ${
-            admin
-              ? `<button
-                  type="button"
-                  class="btn btn-grpc btn-apurar-partida"
-                  data-partida-id="${p.id}"
-                  data-descricao="${escaparHtml(nomeCasa)} x ${escaparHtml(nomeFora)}"
-                >
-                  ⚡ Apurar Resultado na API Externa (Go + gRPC)
-                </button>`
-              : ''
-          }
-        `
-        : `
-          <div class="aviso-partida-encerrada">
-            🔒 Partida encerrada — Placar Oficial: <strong>${escaparHtml(placarExibicao)}</strong>
-          </div>
-        `;
+      const rodapeHtml =
+        p.somenteLeituraExterna && !finalizada
+          ? `<div class="card-partida-rodape"><div class="aviso-partida-encerrada">⚠️ API offline — ligue o sistema (docker compose up -d) para desafiar nesta partida</div></div>`
+          : !finalizada
+          ? `
+            <div class="card-partida-rodape">
+              <button
+                type="button"
+                class="btn btn-primario btn-bloco btn-abrir-desafio"
+                data-partida-id="${p.id}"
+              >
+                ⚔️ Desafiar Usuário nesta Partida
+              </button>
+            </div>
+          `
+          : '';
 
       const selecionadaNoBolao = modoSelecaoBolaoAtivo && partidasSelecionadasBolaoIds.has(Number(p.id));
       const caixinhaBolaoHtml =
@@ -942,7 +1184,7 @@ function renderizarPartidasArena(partidas) {
           <div class="card-partida-topo">
             <div style="display:flex;align-items:center;gap:8px;">
               ${caixinhaBolaoHtml}
-              <span class="liga-tag">Jogo #${p.id} • 📅 ${escaparHtml(dataBr)}</span>
+              <span class="liga-tag">Jogo #${p.id}</span>
             </div>
             ${badgeStatus}
           </div>
@@ -965,9 +1207,7 @@ function renderizarPartidasArena(partidas) {
             </div>
           </div>
 
-          <div class="card-partida-rodape">
-            ${botaoAcao}
-          </div>
+          ${rodapeHtml}
         </article>
       `;
     })
@@ -993,33 +1233,6 @@ function renderizarPartidasArena(partidas) {
       }
       if (ev.target.closest('button')) return;
       abrirModalDesafio(Number(card.dataset.cardPartidaId));
-    });
-  });
-
-  // Botão exclusivo do Admin para apurar via Go + gRPC
-  container.querySelectorAll('.btn-apurar-partida').forEach((botao) => {
-    botao.addEventListener('click', async (ev) => {
-      ev.stopPropagation();
-      const partidaId = Number(botao.dataset.partidaId);
-      const descricao = botao.dataset.descricao || `Partida #${partidaId}`;
-      const textoOriginal = botao.textContent;
-      botao.disabled = true;
-      botao.textContent = '⏳ Consultando Go + gRPC + TheSportsDB...';
-
-      try {
-        const partidaApurada = await requisicaoApi(`/partidas/${partidaId}/apurar`, {
-          method: 'POST',
-        });
-        mostrarToast(
-          `Resultado apurado para ${descricao}: ${partidaApurada.placar}! Desafios X1 liquidados com comissão de 5%.`
-        );
-        await sincronizarDadosUsuarioLogado();
-        await carregarPartidasArena();
-      } catch (erro) {
-        mostrarToast(erro.message, 'erro');
-        botao.disabled = false;
-        botao.textContent = textoOriginal;
-      }
     });
   });
 }
@@ -2014,9 +2227,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('btn-buscar-externas')?.addEventListener('click', carregarPartidasExternasHojeEAmanha);
   document.getElementById('btn-importar-todas')?.addEventListener('click', () => importarTodasPartidasExternas(false));
 
-  // Mural de Partidas e Minhas Apostas
-  document.getElementById('btn-recarregar-arena')?.addEventListener('click', carregarPartidasArena);
-  document.getElementById('filtro-status-arena')?.addEventListener('change', carregarPartidasArena);
+  // Filtro único do Mural de Partidas (atualiza imediatamente ao trocar e volta para a página 1)
+  document.getElementById('filtro-status-arena')?.addEventListener('change', () => {
+    paginaAtualMural = 1;
+    renderizarPartidasArena(partidasArenaCache);
+  });
   document.getElementById('btn-recarregar-palpites')?.addEventListener('click', carregarMinhasApostas);
   document.getElementById('filtro-escopo-palpites')?.addEventListener('change', carregarMinhasApostas);
   document.getElementById('btn-recarregar-ranking')?.addEventListener('click', carregarRanking);
@@ -2044,14 +2259,27 @@ document.addEventListener('DOMContentLoaded', async () => {
       await carregarConvitesPendentes();
     }
     contadorCiclosTempoReal++;
-    if (contadorCiclosTempoReal % 2 === 0) {
+    if (contadorCiclosTempoReal % 60 === 0) {
+      // A cada 10 minutos, reconsulta a grade de datas (eventsday.php) caso tenha virado o dia
       await carregarPartidasExternasHojeEAmanha();
+    } else if (contadorCiclosTempoReal % 3 === 0) {
+      // A cada 30 segundos, consulta APENAS o lookupevent.php da(s) partida(s) que está(ão) acontecendo agora
+      await atualizarSomentePlacaresAoVivo();
+    }
+    if (contadorCiclosTempoReal % 3 === 0) {
       await importarTodasPartidasExternas(true);
       await sincronizarDadosUsuarioLogado();
-      if (document.getElementById('aba-boloes')?.classList.contains('ativa')) {
+      const elementoFocado = document.activeElement;
+      const digitandoNoBolao =
+        elementoFocado &&
+        (elementoFocado.tagName === 'INPUT' || elementoFocado.tagName === 'TEXTAREA') &&
+        document.getElementById('aba-boloes')?.contains(elementoFocado);
+      if (!digitandoNoBolao && document.getElementById('aba-boloes')?.classList.contains('ativa')) {
         await carregarMeusBoloes();
       } else if (document.getElementById('aba-palpites')?.classList.contains('ativa')) {
         await carregarMinhasApostas();
+      } else if (document.getElementById('aba-ranking')?.classList.contains('ativa')) {
+        await carregarRanking();
       }
     }
   }, 10000);

@@ -82,60 +82,24 @@
 
         <div class="cabecalho-secao">
           <div>
-            <h2>🏟️ Mural de Partidas (9 Jogos em Destaque — TheSportsDB)</h2>
+            <h2>🏟️ Mural de Partidas</h2>
             <p id="descricao-mural">Clique em qualquer partida abaixo para abrir o card do jogo e <strong>desafiar outro usuário (Desafio X1)</strong> apostando no Vencedor Mandante, Empate ou Vencedor Visitante.</p>
           </div>
           <div class="acoes-secao">
             <select id="filtro-status-arena" class="input-padrao">
-              <option value="">Todas as 9 Partidas</option>
-              <option value="AGENDADA">Abertas para Desafio</option>
-              <option value="FINALIZADA">Encerradas</option>
+              <option value="TODAS">Todas</option>
+              <option value="EM_ANDAMENTO">Em andamento</option>
+              <option value="ENCERRADAS">Encerradas</option>
             </select>
-            <button id="btn-recarregar-arena" class="btn btn-secundario" type="button">
-              🔄 Atualizar Mural
-            </button>
+            <div id="paginacao-mural-topo" class="paginacao-mural"></div>
           </div>
         </div>
 
         <div id="lista-partidas-arena" class="grade-partidas grade-9-partidas">
-          <p class="texto-vazio">Carregando as 9 partidas do Mural de Partidas...</p>
-        </div>
-      </div>
-
-      <!-- Bloco exclusivo do Admin: Busca manual de outras datas na TheSportsDB -->
-      <div class="painel-card apenas-admin">
-        <div class="cabecalho-secao">
-          <div>
-            <h2>🌐 Catálogo Completo da API Externa (TheSportsDB — Modo Admin)</h2>
-            <p>Ferramenta administrativa para buscar jogos de outras datas na TheSportsDB e sincronizar com o banco da Arena.</p>
-          </div>
-          <div class="acoes-secao">
-            <button id="btn-hoje-amanha" class="btn btn-secundario" type="button">
-              📅 Hoje e Amanhã
-            </button>
-            <button id="btn-importar-todas" class="btn btn-primario" type="button">
-              📥 Sincronizar 9 Jogos no Mural
-            </button>
-          </div>
+          <p class="texto-vazio">Carregando partidas do Mural...</p>
         </div>
 
-        <div class="barra-filtros">
-          <div class="campo-inline">
-            <label for="filtro-data-hoje">Dia 1 (Hoje):</label>
-            <input type="date" id="filtro-data-hoje" class="input-padrao" />
-          </div>
-          <div class="campo-inline">
-            <label for="filtro-data-amanha">Dia 2 (Amanhã):</label>
-            <input type="date" id="filtro-data-amanha" class="input-padrao" />
-          </div>
-          <button id="btn-buscar-externas" class="btn btn-info" type="button">
-            🔍 Buscar na API Externa
-          </button>
-        </div>
-
-        <div id="lista-partidas-externas" class="grade-partidas">
-          <p class="texto-vazio">Carregando partidas da TheSportsDB...</p>
-        </div>
+        <div id="paginacao-mural-rodape" class="paginacao-mural paginacao-mural-rodape"></div>
       </div>
 
     </section>

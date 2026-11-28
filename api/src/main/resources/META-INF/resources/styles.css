@@ -1273,4 +1273,50 @@ body[data-modo="admin"] .apenas-visitante {
   font-size: 0.9rem;
 }
 
+/* Paginação do Mural de Partidas (9 jogos por página com setas ◀ ▶) */
+.paginacao-mural {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.paginacao-mural-rodape {
+  display: flex;
+  justify-content: center;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--borda-clara);
+}
+
+.btn-seta-pagina {
+  background: var(--bg-card-interno);
+  color: var(--texto);
+  border: 1px solid var(--borda-clara);
+  border-radius: 8px;
+  padding: 7px 13px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-seta-pagina:hover:not(:disabled) {
+  border-color: var(--verde-arena);
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+}
+
+.btn-seta-pagina:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.indicador-pagina-mural {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--texto-secundario);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
 
