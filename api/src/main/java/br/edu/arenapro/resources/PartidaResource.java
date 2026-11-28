@@ -207,7 +207,14 @@ public class PartidaResource {
         partida.setTimeCasa(casa);
         partida.setTimeFora(fora);
         partida.setData(corpo.data());
-        partida.setPlacar(corpo.placar());
+        // Impede regressão acidental de placar (ex.: cache antigo 0x0 tentando sobrescrever 1x0 já registrado)
+        if (corpo.placar() != null && partida.getPlacar() != null
+                && corpo.status() != StatusPartida.FINALIZADA
+                && br.edu.arenapro.domain.PlacarAoVivo.totalGols(corpo.placar()) < br.edu.arenapro.domain.PlacarAoVivo.totalGols(partida.getPlacar())) {
+            // Mantém o placar com mais gols já registrado
+        } else {
+            partida.setPlacar(corpo.placar());
+        }
         if (corpo.status() != null) {
             partida.setStatus(corpo.status());
         }
